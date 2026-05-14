@@ -281,6 +281,8 @@ def listar_contagens_historico(inv_ids):
 # ── Estoque Excel ──────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner="Carregando base de estoque...")
 def carregar_estoque():
+    if not os.path.exists(ESTOQUE_FILE):
+        return pd.DataFrame()
     df = pd.read_excel(ESTOQUE_FILE, dtype=str)
     df.columns = [c.strip() for c in df.columns]
     for col in df.columns:
@@ -305,15 +307,15 @@ def interpretar_ativo(valor):
         return False
     return True       # S, SIM, ATIVO, 1, TRUE ou qualquer outro valor = ativo
 
-# ── Carrega estoque — erro aparece no frontend ─────────────────────────────────
+# ── Carrega estoque — sem o arquivo, exibe aviso de upload ───────────────────
 try:
     df_estoque = carregar_estoque()
-    estoques_disponiveis = sorted(df_estoque["Id. Estoq. Físico"].unique().tolist())
+    estoques_disponiveis = sorted(df_estoque["Id. Estoq. Físico"].unique().tolist()) if not df_estoque.empty else []
 except Exception as e:
     st.error(f"❌ Erro ao carregar `estoque.xlsx`:\n\n{e}")
-    st.info(f"Caminho esperado: `{ESTOQUE_FILE}`")
     st.code(traceback.format_exc())
-    st.stop()
+    df_estoque = pd.DataFrame()
+    estoques_disponiveis = []
 
 # ── Session State ──────────────────────────────────────────────────────────────
 for k, v in {
@@ -426,6 +428,8 @@ with aba1:
     if not st.session_state.inv_id:
         st.info("Selecione ou crie um inventário na barra lateral para começar.")
     else:
+        if df_estoque.empty:
+            st.warning("⚠️ Nenhuma base de estoque carregada. Faça o upload do arquivo `estoque.xlsx` na barra lateral (📂 Carregar / Atualizar Estoque).")
         # ── Campo de busca ────────────────────────────────────────────────────
         col_cod, col_est = st.columns([3, 1])
         with col_cod:
