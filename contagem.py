@@ -891,7 +891,7 @@ with aba3:
                 col1, col2, col3 = st.columns(3)
                 col1.write(f"**Status:** {inv['status']}")
                 col2.write(f"**Início:** {inv['data_inicio'][:16]}")
-                col3.write(f"**Fim:** {inv['data_fim'][:16] if inv['data_fim'] else '–'}")
+                col3.write(f"**Fim:** {inv['data_fim'][:16] if pd.notna(inv['data_fim']) else '–'}")
                 if inv["descricao"]:
                     st.caption(inv["descricao"])
 
