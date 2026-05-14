@@ -1,0 +1,21 @@
+contagem.db
+__pycache__/
+*.pyc
+contagem_debug.py
+mini_test.py
+test_app.py
+err2.txt
+erro_log.txt
+streamlit_err.txt
+streamlit_out.txt
+out2.txt
+~$*.xlsx
+
+# Streamlit secrets — NUNCA commitar credenciais reais
+.streamlit/secrets.toml
+
+# Arquivos de saída gerados pelo app
+contagem_resultado.xlsx
+
+# Planilha de estoque — carregada pelo app a cada uso
+estoque.xlsx
