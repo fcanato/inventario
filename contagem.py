@@ -953,5 +953,49 @@ with aba4:
         )
         df_v4 = df_v4[mask]
 
-    st.dataframe(df_v4, use_container_width=True, hide_index=True)
+    # ── Colorir linhas conforme status de contagem no inventário ativo ────────
+    if st.session_state.inv_id and not df_v4.empty:
+        st.markdown(
+            "<div style='display:flex;gap:16px;margin-bottom:8px;align-items:center'>"
+            "<span style='background:#c8e6c9;color:#1b5e20;padding:3px 12px;"
+            "border-radius:8px;font-size:13px;font-weight:700'>🟢 Já contado</span>"
+            "<span style='background:#ffcdd2;color:#b71c1c;padding:3px 12px;"
+            "border-radius:8px;font-size:13px;font-weight:700'>🔴 Pendente</span>"
+            "</div>",
+            unsafe_allow_html=True
+        )
+
+        df_cnt4 = listar_contagens(st.session_state.inv_id)
+        if not df_cnt4.empty:
+            contados_set = set(
+                zip(
+                    df_cnt4["cod_produto"].astype(str).str.strip(),
+                    df_cnt4["id_estoque"].astype(str).str.strip(),
+                    df_cnt4["ativo"].astype(str).str.strip(),
+                )
+            )
+        else:
+            contados_set = set()
+
+        def _cor_linha(row):
+            pat = str(row.get("Ativo", "")).strip()
+            tem_pat = pat.upper() not in ["", "NAN", "NONE"]
+            ativo_ok_r = interpretar_ativo(pat)
+            ativo_salvo_r = pat if tem_pat else ("Ativo" if ativo_ok_r else "Inativo")
+            chave = (
+                str(row["Cód. Produto"]).strip(),
+                str(row["Id. Estoq. Físico"]).strip(),
+                ativo_salvo_r,
+            )
+            if chave in contados_set:
+                return ["background-color: #c8e6c9; color: #1b5e20"] * len(row)
+            return ["background-color: #ffcdd2; color: #b71c1c"] * len(row)
+
+        st.dataframe(
+            df_v4.style.apply(_cor_linha, axis=1),
+            use_container_width=True, hide_index=True
+        )
+    else:
+        st.dataframe(df_v4, use_container_width=True, hide_index=True)
+
     st.caption(f"{len(df_v4)} itens exibidos | Arquivo: {ESTOQUE_FILE}")
