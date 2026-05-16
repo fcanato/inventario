@@ -755,7 +755,7 @@ with aba1:
                 contados_ate_agora = 0
                 for _, _r in df_p.iterrows():
                     _pat = str(_r.get("Ativo", "")).strip()
-                    _as  = _pat if _pat.upper() not in ["", "NAN", "NONE"] else ("Ativo" if interpretar_ativo(_pat) else "Inativo")
+                    _as  = _pat if _pat.upper() not in ["", "NAN", "NONE"] else ""
                     _lt  = str(_r.get("Lote", "")).strip()
                     _lt  = "" if _lt.upper() in ["NAN", "NONE"] else _lt
                     if buscar_contagem_existente(st.session_state.inv_id, _r.get("Cód. Produto", ""), _r.get("Id. Estoq. Físico", ""), _as, _lt):
@@ -790,7 +790,7 @@ with aba1:
                         pat      = str(row.get("Ativo", "")).strip()
                         tem_pat  = pat.upper() not in ["", "NAN", "NONE"]
                         ativo_ok_r = interpretar_ativo(pat)
-                        asalvo_r = pat if tem_pat else ("Ativo" if ativo_ok_r else "Inativo")
+                        asalvo_r = pat if tem_pat else ""
                         lote_r   = str(row.get("Lote", "")).strip()
                         lote_r   = "" if lote_r.upper() in ["NAN", "NONE"] else lote_r
                         ja_r = buscar_contagem_existente(
@@ -920,7 +920,7 @@ with aba1:
                 ativo_tem_numero = ativo_num.upper() not in ["", "NAN", "NONE"]
                 ativo_ok         = interpretar_ativo(ativo_num)
                 badge            = "🟢 Ativo" if ativo_ok else "🔴 Inativo"
-                ativo_salvo      = ativo_num if ativo_tem_numero else ("Ativo" if ativo_ok else "Inativo")
+                ativo_salvo      = ativo_num if ativo_tem_numero else ""
                 lote_val         = str(linha.get("Lote", "")).strip()
                 lote_val         = "" if lote_val.upper() in ["NAN", "NONE"] else lote_val
 
@@ -1075,7 +1075,7 @@ with aba1:
                         ativo_ok_r = interpretar_ativo(pat)
 
                         # Verifica se este patrimônio já foi contado
-                        ativo_salvo_r = pat if tem_pat else ("Ativo" if ativo_ok_r else "Inativo")
+                        ativo_salvo_r = pat if tem_pat else ""
                         ja_cnt_r = buscar_contagem_existente(
                             st.session_state.inv_id,
                             row["Cód. Produto"],
@@ -1313,7 +1313,7 @@ with aba4:
             pat = str(row.get("Ativo", "")).strip()
             tem_pat = pat.upper() not in ["", "NAN", "NONE"]
             ativo_ok_r = interpretar_ativo(pat)
-            ativo_salvo_r = pat if tem_pat else ("Ativo" if ativo_ok_r else "Inativo")
+            ativo_salvo_r = pat if tem_pat else ""
             lote_r = str(row.get("Lote", "")).strip()
             lote_r = "" if lote_r.upper() in ["NAN", "NONE"] else lote_r
             chave = (
