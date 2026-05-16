@@ -4,6 +4,7 @@ import sqlite3
 import os
 import io
 import traceback
+import unicodedata
 from datetime import datetime, date
 
 try:
@@ -431,12 +432,19 @@ def listar_contagens_historico(inv_ids):
     return df
 
 # ── Estoque Excel ──────────────────────────────────────────────────────────────
+def _norm_col(c: str) -> str:
+    """Normaliza nome de coluna do Excel: unicode NFKC, non-breaking spaces e espaços duplos."""
+    c = unicodedata.normalize("NFKC", str(c))
+    c = c.replace("\u00a0", " ").replace("\xa0", " ")
+    return " ".join(c.split()).strip()
+
+
 @st.cache_data(show_spinner="Carregando base de estoque...")
 def carregar_estoque():
     if not os.path.exists(ESTOQUE_FILE):
         return pd.DataFrame()
     df = pd.read_excel(ESTOQUE_FILE, dtype=str)
-    df.columns = [c.strip() for c in df.columns]
+    df.columns = [_norm_col(c) for c in df.columns]
     for col in df.columns:
         df[col] = df[col].fillna("").str.strip()
     return df
@@ -750,14 +758,14 @@ with aba1:
                     _as  = _pat if _pat.upper() not in ["", "NAN", "NONE"] else ("Ativo" if interpretar_ativo(_pat) else "Inativo")
                     _lt  = str(_r.get("Lote", "")).strip()
                     _lt  = "" if _lt.upper() in ["NAN", "NONE"] else _lt
-                    if buscar_contagem_existente(st.session_state.inv_id, _r["Cód. Produto"], _r["Id. Estoq. Físico"], _as, _lt):
+                    if buscar_contagem_existente(st.session_state.inv_id, _r.get("Cód. Produto", ""), _r.get("Id. Estoq. Físico", ""), _as, _lt):
                         contados_ate_agora += 1
 
                 st.markdown(
                     f"<div style='background:#fff8e1;border-left:5px solid #f9a825;"
                     f"padding:14px 18px;border-radius:10px;margin-bottom:16px'>"
-                    f"<b style='font-size:18px;color:#5d4037'>📦 {df_p.iloc[0]['Cód. Produto']}</b><br>"
-                    f"<span style='color:#555;font-size:13px'>{df_p.iloc[0]['Desc. Produto']}</span><br>"
+                    f"<b style='font-size:18px;color:#5d4037'>📦 {df_p.iloc[0].get('Cód. Produto', '')}</b><br>"
+                    f"<span style='color:#555;font-size:13px'>{df_p.iloc[0].get('Desc. Produto', '')}</span><br>"
                     f"<div style='margin-top:10px;display:flex;gap:20px'>"
                     f"<span style='background:#fff3e0;border:1px solid #ffb74d;border-radius:8px;"
                     f"padding:6px 14px;font-size:13px;font-weight:700;color:#e65100'>"
@@ -787,7 +795,7 @@ with aba1:
                         lote_r   = "" if lote_r.upper() in ["NAN", "NONE"] else lote_r
                         ja_r = buscar_contagem_existente(
                             st.session_state.inv_id,
-                            row["Cód. Produto"], row["Id. Estoq. Físico"], asalvo_r, lote_r
+                            row.get("Cód. Produto", ""), row.get("Id. Estoq. Físico", ""), asalvo_r, lote_r
                         )
                         try:
                             qtd_sist_r = float(str(row.get("Qtd Estoque", "0")).replace(",", "."))
@@ -867,11 +875,11 @@ with aba1:
                         for idx, row, asalvo_r, lote_r, qtd_sist_r, qtd_val, obs_val in entradas:
                             diferenca = qtd_val - qtd_sist_r
                             dados = {
-                                "id_estoque":   row["Id. Estoq. Físico"],
-                                "desc_estoque": row["Desc. Estoque Físico"],
-                                "cod_produto":  row["Cód. Produto"],
-                                "desc_produto": row["Desc. Produto"],
-                                "unid_medida":  row["Unid. Medida"],
+                                "id_estoque":   row.get("Id. Estoq. Físico", ""),
+                                "desc_estoque": row.get("Desc. Estoque Físico", ""),
+                                "cod_produto":  row.get("Cód. Produto", ""),
+                                "desc_produto": row.get("Desc. Produto", ""),
+                                "unid_medida":  row.get("Unid. Medida", ""),
                                 "qtd_sistema":  qtd_sist_r,
                                 "qtd_contada":  qtd_val,
                                 "diferenca":    diferenca,
@@ -919,12 +927,12 @@ with aba1:
                 # ── Card do produto ──────────────────────────────────────────
                 with st.container(border=True):
                     c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Cód. Produto",   linha["Cód. Produto"])
-                    c2.metric("Estoque Físico",  linha["Id. Estoq. Físico"])
-                    c3.metric("Unid. Medida",    linha["Unid. Medida"])
+                    c1.metric("Cód. Produto",   linha.get("Cód. Produto", ""))
+                    c2.metric("Estoque Físico",  linha.get("Id. Estoq. Físico", ""))
+                    c3.metric("Unid. Medida",    linha.get("Unid. Medida", ""))
                     c4.metric("Status",          badge)
-                    st.markdown(f"**Descrição:** {linha['Desc. Produto']}")
-                    st.markdown(f"**Local:** {linha['Desc. Estoque Físico']}")
+                    st.markdown(f"**Descrição:** {linha.get('Desc. Produto', '')}")
+                    st.markdown(f"**Local:** {linha.get('Desc. Estoque Físico', '')}")
 
                     if ativo_tem_numero:
                         st.markdown(
@@ -957,7 +965,7 @@ with aba1:
                 # ── Trava: item já contado? ──────────────────────────────────
                 ja_contado = buscar_contagem_existente(
                     st.session_state.inv_id,
-                    linha["Cód. Produto"], linha["Id. Estoq. Físico"], ativo_salvo, lote_val
+                    linha.get("Cód. Produto", ""), linha.get("Id. Estoq. Físico", ""), ativo_salvo, lote_val
                 )
 
                 if ja_contado and not st.session_state.permitir_recontagem:
@@ -1005,11 +1013,11 @@ with aba1:
                                                  use_container_width=True):
                             diferenca = qtd_contada - qtd_sist
                             dados = {
-                                "id_estoque":   linha["Id. Estoq. Físico"],
-                                "desc_estoque": linha["Desc. Estoque Físico"],
-                                "cod_produto":  linha["Cód. Produto"],
-                                "desc_produto": linha["Desc. Produto"],
-                                "unid_medida":  linha["Unid. Medida"],
+                                "id_estoque":   linha.get("Id. Estoq. Físico", ""),
+                                "desc_estoque": linha.get("Desc. Estoque Físico", ""),
+                                "cod_produto":  linha.get("Cód. Produto", ""),
+                                "desc_produto": linha.get("Desc. Produto", ""),
+                                "unid_medida":  linha.get("Unid. Medida", ""),
                                 "qtd_sistema":  qtd_sist,
                                 "qtd_contada":  qtd_contada,
                                 "diferenca":    diferenca,
