@@ -641,18 +641,51 @@ with aba1:
         if df_estoque.empty:
             st.warning("⚠️ Nenhuma base de estoque carregada. Faça o upload do arquivo `estoque.xlsx` na barra lateral (📂 Carregar / Atualizar Estoque).")
         # ── Campo de busca ────────────────────────────────────────────────────
+        # Máscara JS: insere hífen automaticamente a cada 4 caracteres digitados
+        st.html("""<script>(function(){
+  if(window._codMaskReady)return;window._codMaskReady=true;
+  function applyMask(el){
+    if(el._codMask)return;el._codMask=true;
+    el.addEventListener('input',function(e){
+      if(e._fm)return;
+      var s=this.selectionStart,p=this.value;
+      var r=p.replace(/[^a-zA-Z0-9]/g,''),f='';
+      for(var i=0;i<r.length;i++){if(i&&i%4===0)f+='-';f+=r[i];}
+      if(f!==p){
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(this,f);
+        var ev=new Event('input',{bubbles:true});ev._fm=true;this.dispatchEvent(ev);
+        var d=f.length-p.length;try{this.setSelectionRange(s+d,s+d);}catch(x){}
+      }
+    },true);
+  }
+  new MutationObserver(function(){
+    document.querySelectorAll('input[type="text"]').forEach(function(inp){
+      if(inp.placeholder&&inp.placeholder.includes('1234-'))applyMask(inp);
+    });
+  }).observe(document.body,{childList:true,subtree:true});
+})();</script>""")
+
         col_cod, col_est = st.columns([3, 1])
         with col_cod:
-            codigo = st.text_input(
-                "📷 Código do Produto (etiqueta ou manual)",
-                placeholder="Ex: TEFE2093Z",
-                key=f"cod_input_{st.session_state.input_key}"
-            )
+            try:
+                from streamlit_keyup import st_keyup as _st_keyup
+                codigo = _st_keyup(
+                    "📷 Código do Produto",
+                    key=f"cod_input_{st.session_state.input_key}",
+                    debounce=300,
+                    placeholder="Ex: 1234-5678 — busca automática",
+                ) or ""
+            except ImportError:
+                codigo = st.text_input(
+                    "📷 Código do Produto (etiqueta ou manual)",
+                    key=f"cod_input_{st.session_state.input_key}",
+                    placeholder="Ex: 1234-5678 — Enter para buscar",
+                ) or ""
         with col_est:
             est_filtro = st.selectbox("📍 Estoque Físico", ["Todos"] + estoques_disponiveis)
 
         buscar = st.button("🔎 Buscar", type="primary", use_container_width=True)
-        cod = codigo.strip()
+        cod = (codigo or "").strip()
         _cod_completo = ("-" in cod and len(cod) >= 4) or len(cod) >= 8
 
         # ── Leitor de câmera ──────────────────────────────────────────────────
