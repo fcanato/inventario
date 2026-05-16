@@ -653,6 +653,7 @@ with aba1:
 
         buscar = st.button("🔎 Buscar", type="primary", use_container_width=True)
         cod = codigo.strip()
+        _cod_completo = ("-" in cod and len(cod) >= 4) or len(cod) >= 8
 
         # ── Leitor de câmera ──────────────────────────────────────────────────
         with st.expander("📷 Ler QR Code / Código de Barras"):
