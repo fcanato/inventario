@@ -724,7 +724,7 @@ with aba1:
                         st.error(f"❌ Erro ao processar imagem: {_e}")
 
         # Nova busca → zera seleção anterior
-        if cod and (cod != st.session_state.ultimo_cod or buscar):
+        if cod and (buscar or (cod != st.session_state.ultimo_cod and _cod_completo)):
             st.session_state.ultimo_cod       = cod
             st.session_state.linha_selecionada = None
             st.session_state.permitir_recontagem = False
