@@ -903,6 +903,19 @@ with st.sidebar:
 
     st.divider()
     with st.expander("📂 Carregar / Atualizar Estoque"):
+        st.markdown(
+            "<div style='font-size:11px;color:#90caf9;font-weight:700;"
+            "text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px'>"
+            "Colunas recomendadas</div>"
+            "<div style='font-size:10px;color:#cfd8dc;line-height:1.6'>"
+            "Id. Estoq. Físico &nbsp;·&nbsp; Desc. Estoque Físico &nbsp;·&nbsp; "
+            "Cód. Produto &nbsp;·&nbsp; Desc. Produto &nbsp;·&nbsp; "
+            "Unid. Medida &nbsp;·&nbsp; Qtd Estoque &nbsp;·&nbsp; "
+            "Ativo &nbsp;·&nbsp; Lote"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        st.caption("Outros formatos também são aceitos.")
         uploaded = st.file_uploader(
             "Selecione o arquivo estoque.xlsx",
             type=["xlsx"],
