@@ -258,6 +258,13 @@ def init_db():
         cur.execute(
             "ALTER TABLE inventarios ADD COLUMN IF NOT EXISTS usuario_id INTEGER DEFAULT NULL"
         )
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS estoque_arquivos (
+                user_id       INTEGER PRIMARY KEY,
+                dados         BYTEA NOT NULL,
+                atualizado_em TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         conn.commit()
         cur.close()
         conn.close()
@@ -357,8 +364,59 @@ def init_db():
             created_at    TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS estoque_arquivos (
+            user_id       INTEGER PRIMARY KEY,
+            dados         BLOB NOT NULL,
+            atualizado_em TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     conn.commit()
     conn.close()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ESTOQUE — persistência no banco
+# ══════════════════════════════════════════════════════════════════════════════
+
+def salvar_estoque_db(user_id, dados_bytes: bytes):
+    """Persiste o arquivo de estoque do usuário no banco de dados."""
+    agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn  = get_conn()
+    if USE_PG:
+        import psycopg2
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO estoque_arquivos (user_id, dados, atualizado_em)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id) DO UPDATE
+                        SET dados = EXCLUDED.dados,
+                            atualizado_em = EXCLUDED.atualizado_em
+                    """,
+                    (user_id, psycopg2.Binary(dados_bytes), agora)
+                )
+    else:
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO estoque_arquivos (user_id, dados, atualizado_em) VALUES (?, ?, ?)",
+                (user_id, dados_bytes, agora)
+            )
+    conn.close()
+
+
+def carregar_estoque_db(user_id):
+    """Carrega o arquivo de estoque do usuário do banco. Retorna bytes ou None."""
+    conn = get_conn()
+    try:
+        cur = _execute(conn, "SELECT dados FROM estoque_arquivos WHERE user_id = ?", (user_id,))
+        row = _fetchone(cur)
+    finally:
+        conn.close()
+    if row:
+        return bytes(row["dados"])
+    return None
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # AUTENTICAÇÃO
@@ -720,16 +778,33 @@ if _SS_KEY in st.session_state:
         df_estoque["Id. Estoq. Físico"].unique().tolist()
     ) if not df_estoque.empty else []
 else:
+    df_estoque       = pd.DataFrame()
+    estoques_disponiveis = []
+    # 1º: banco de dados (persiste entre reinicializações)
     try:
-        df_estoque = carregar_estoque(uid)
-        estoques_disponiveis = sorted(
-            df_estoque["Id. Estoq. Físico"].unique().tolist()
-        ) if not df_estoque.empty else []
-    except Exception as e:
-        st.error(f"❌ Erro ao carregar base de estoque:\n\n{e}")
-        st.code(traceback.format_exc())
-        df_estoque = pd.DataFrame()
-        estoques_disponiveis = []
+        _raw = carregar_estoque_db(uid)
+        if _raw:
+            _df_db = pd.read_excel(io.BytesIO(_raw), dtype=str)
+            _df_db.columns = [_norm_col(c) for c in _df_db.columns]
+            for _c in _df_db.columns:
+                _df_db[_c] = _df_db[_c].fillna("").str.strip()
+            df_estoque = _df_db
+            st.session_state[_SS_KEY] = df_estoque
+    except Exception:
+        pass
+    # 2º: fallback disco local (desenvolvimento)
+    if df_estoque.empty:
+        try:
+            _df_disk = carregar_estoque(uid)
+            if not _df_disk.empty:
+                df_estoque = _df_disk
+                st.session_state[_SS_KEY] = df_estoque
+        except Exception as _e:
+            st.error(f"❌ Erro ao carregar base de estoque:\n\n{_e}")
+            st.code(traceback.format_exc())
+    estoques_disponiveis = sorted(
+        df_estoque["Id. Estoq. Físico"].unique().tolist()
+    ) if not df_estoque.empty else []
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
@@ -837,22 +912,30 @@ with st.sidebar:
             _bytes = uploaded.getvalue()
             _hash  = hashlib.md5(_bytes).hexdigest()
             if st.session_state.get("_ultimo_upload_hash") != _hash:
-                # Salva no disco
-                with open(_estoque_file, "wb") as f:
-                    f.write(_bytes)
-                # Parseia dos bytes (já em memória — sem leitura de disco)
+                # 1. Persiste no banco de dados (sobrevive a reinicializações)
+                try:
+                    salvar_estoque_db(uid, _bytes)
+                except Exception as _e:
+                    st.warning(f"⚠️ Não foi possível salvar no banco: {_e}")
+                # 2. Salva no disco (fallback local)
+                try:
+                    with open(_estoque_file, "wb") as f:
+                        f.write(_bytes)
+                except Exception:
+                    pass
+                # 3. Parseia dos bytes (já em memória — sem leitura de disco)
                 try:
                     _df_new = pd.read_excel(io.BytesIO(_bytes), dtype=str)
                     _df_new.columns = [_norm_col(c) for c in _df_new.columns]
                     for _c in _df_new.columns:
                         _df_new[_c] = _df_new[_c].fillna("").str.strip()
                     st.session_state[_SS_KEY] = _df_new
-                except Exception:
-                    pass
-                st.session_state["_ultimo_upload_hash"] = _hash
-                carregar_estoque.clear()
-                st.success("✅ Estoque atualizado com sucesso!")
-                st.rerun()
+                    st.session_state["_ultimo_upload_hash"] = _hash  # só após sucesso
+                    carregar_estoque.clear()
+                    st.success("✅ Estoque atualizado com sucesso!")
+                    st.rerun()
+                except Exception as _e:
+                    st.error(f"❌ Erro ao processar o arquivo Excel: {_e}")
             else:
                 st.success("✅ Estoque já carregado.")
         if os.path.exists(_estoque_file):
