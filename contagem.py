@@ -15,6 +15,145 @@ except ImportError:
 
 st.set_page_config(page_title="Contagem de Estoque", page_icon="📦", layout="wide")
 
+# ── Estilos globais ────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* ── Tipografia base ─────────────────────────────────── */
+html, body, [class*="css"] { font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; }
+
+/* ── Cartões de métricas ─────────────────────────────── */
+[data-testid="stMetric"] {
+    background: linear-gradient(135deg, #f0f7ff 0%, #e8f4fd 100%);
+    border-radius: 14px;
+    padding: 16px 20px !important;
+    border: 1px solid #cce0f5;
+    box-shadow: 0 2px 8px rgba(21,101,192,0.08);
+    transition: box-shadow 0.2s;
+}
+[data-testid="stMetric"]:hover {
+    box-shadow: 0 4px 16px rgba(21,101,192,0.15);
+}
+[data-testid="stMetricValue"] {
+    font-size: 2rem !important;
+    font-weight: 900 !important;
+    color: #1a237e !important;
+    line-height: 1.15 !important;
+}
+[data-testid="stMetricLabel"] {
+    font-size: 0.75rem !important;
+    font-weight: 700 !important;
+    color: #546e7a !important;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* ── Botões primários ────────────────────────────────── */
+[data-testid="baseButton-primary"] {
+    border-radius: 10px !important;
+    font-weight: 700 !important;
+    background: linear-gradient(135deg, #1565c0 0%, #1976d2 100%) !important;
+    border: none !important;
+    box-shadow: 0 3px 10px rgba(21,101,192,0.28) !important;
+    letter-spacing: 0.3px;
+    transition: all 0.2s ease !important;
+}
+[data-testid="baseButton-primary"]:hover {
+    box-shadow: 0 5px 18px rgba(21,101,192,0.42) !important;
+    transform: translateY(-1px) !important;
+}
+
+/* ── Botões secundários ──────────────────────────────── */
+[data-testid="baseButton-secondary"] {
+    border-radius: 10px !important;
+    font-weight: 600 !important;
+    transition: all 0.2s ease !important;
+}
+
+/* ── Expanders ───────────────────────────────────────── */
+[data-testid="stExpander"] > details {
+    border-radius: 12px !important;
+    border: 1px solid #dee6f0 !important;
+    overflow: hidden;
+}
+[data-testid="stExpander"] > details > summary {
+    border-radius: 12px !important;
+    font-weight: 600;
+}
+
+/* ── Alertas (success / warning / error / info) ─────── */
+[data-testid="stAlert"] {
+    border-radius: 12px !important;
+    border-width: 0 0 0 5px !important;
+}
+
+/* ── Inputs de texto e número ────────────────────────── */
+[data-testid="stTextInput"] > div > div > input,
+[data-testid="stNumberInput"] > div > div > input {
+    border-radius: 8px !important;
+}
+[data-testid="stSelectbox"] > div > div {
+    border-radius: 8px !important;
+}
+
+/* ── Tabs – visual de "pill" ─────────────────────────── */
+[data-baseweb="tab-list"] {
+    background: #f0f4fa !important;
+    border-radius: 12px !important;
+    padding: 5px !important;
+    gap: 3px !important;
+}
+[data-baseweb="tab"] {
+    border-radius: 9px !important;
+    font-weight: 600 !important;
+    transition: background 0.18s !important;
+}
+[aria-selected="true"][data-baseweb="tab"] {
+    background: #ffffff !important;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.12) !important;
+    color: #1565c0 !important;
+}
+
+/* ── Container padrão (st.container border) ─────────── */
+[data-testid="stVerticalBlock"] [data-testid="stVerticalBlockBorderWrapper"] {
+    border-radius: 14px !important;
+    border-color: #d0e4f7 !important;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+/* ── Sidebar – fundo escuro premium ─────────────────── */
+[data-testid="stSidebar"] > div:first-child {
+    background: linear-gradient(180deg, #0d1b4b 0%, #1a237e 50%, #1565c0 100%) !important;
+}
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] .stMarkdown p,
+[data-testid="stSidebar"] .stMarkdown span,
+[data-testid="stSidebar"] .stCaption,
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 {
+    color: #e8eaf6 !important;
+}
+[data-testid="stSidebar"] [data-testid="stMetric"] {
+    background: rgba(255,255,255,0.12) !important;
+    border-color: rgba(255,255,255,0.2) !important;
+}
+[data-testid="stSidebar"] [data-testid="stMetricValue"] {
+    color: #ffffff !important;
+}
+[data-testid="stSidebar"] [data-testid="stMetricLabel"] {
+    color: #90caf9 !important;
+}
+[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.2) !important; }
+
+/* ── Dataframe / tabela ──────────────────────────────── */
+[data-testid="stDataFrame"] > div {
+    border-radius: 12px !important;
+    overflow: hidden;
+    border: 1px solid #e0e8f4 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ── Paths ──────────────────────────────────────────────────────────────────────
 try:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -85,12 +224,17 @@ def init_db():
                 qtd_contada   REAL,
                 diferenca     REAL,
                 ativo         TEXT,
+                lote          TEXT,
                 observacao    TEXT,
                 operador      TEXT,
                 data_hora     TEXT,
                 FOREIGN KEY (inventario_id) REFERENCES inventarios(id)
             )
         """)
+        # Migração: adiciona coluna lote em bancos existentes (PG suporta IF NOT EXISTS)
+        cur.execute(
+            "ALTER TABLE contagens ADD COLUMN IF NOT EXISTS lote TEXT DEFAULT ''"
+        )
         conn.commit()
         cur.close()
         conn.close()
@@ -118,6 +262,7 @@ def init_db():
             qtd_contada   REAL,
             diferenca     REAL,
             ativo         TEXT,
+            lote          TEXT,
             observacao    TEXT,
             operador      TEXT,
             data_hora     TEXT,
@@ -150,12 +295,18 @@ def init_db():
                 qtd_contada   REAL,
                 diferenca     REAL,
                 ativo         TEXT,
+                lote          TEXT,
                 observacao    TEXT,
                 operador      TEXT,
                 data_hora     TEXT,
                 FOREIGN KEY (inventario_id) REFERENCES inventarios(id)
             );
         """)
+        conn.commit()
+    # Migração: adiciona coluna lote em bancos SQLite existentes
+    cols_now = [r[1] for r in conn.execute("PRAGMA table_info(contagens)").fetchall()]
+    if "lote" not in cols_now:
+        conn.execute("ALTER TABLE contagens ADD COLUMN lote TEXT DEFAULT ''")
         conn.commit()
     conn.close()
 
@@ -220,9 +371,10 @@ def listar_inventarios():
 def salvar_contagem(inv_id, dados, operador):
     conn = get_conn()
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lote = dados.get("lote", "") or ""
     cur = _execute(conn,
-        "SELECT id FROM contagens WHERE inventario_id=? AND cod_produto=? AND id_estoque=? AND ativo=?",
-        (inv_id, dados["cod_produto"], dados["id_estoque"], dados["ativo"])
+        "SELECT id FROM contagens WHERE inventario_id=? AND cod_produto=? AND id_estoque=? AND ativo=? AND lote=?",
+        (inv_id, dados["cod_produto"], dados["id_estoque"], dados["ativo"], lote)
     )
     existe = _fetchone(cur)
     if existe:
@@ -234,12 +386,12 @@ def salvar_contagem(inv_id, dados, operador):
         _execute(conn,
             """INSERT INTO contagens
                (inventario_id,id_estoque,desc_estoque,cod_produto,desc_produto,
-                unid_medida,qtd_sistema,qtd_contada,diferenca,ativo,observacao,operador,data_hora)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                unid_medida,qtd_sistema,qtd_contada,diferenca,ativo,lote,observacao,operador,data_hora)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (inv_id, dados["id_estoque"], dados["desc_estoque"], dados["cod_produto"],
              dados["desc_produto"], dados["unid_medida"], dados["qtd_sistema"],
              dados["qtd_contada"], dados["diferenca"], dados["ativo"],
-             dados["observacao"], operador, agora)
+             lote, dados["observacao"], operador, agora)
         )
     conn.commit(); conn.close()
 
@@ -254,11 +406,11 @@ def listar_contagens(inv_id):
     conn.close()
     return df
 
-def buscar_contagem_existente(inv_id, cod_produto, id_estoque, ativo):
+def buscar_contagem_existente(inv_id, cod_produto, id_estoque, ativo, lote=""):
     conn = get_conn()
     cur = _execute(conn,
-        "SELECT * FROM contagens WHERE inventario_id=? AND cod_produto=? AND id_estoque=? AND ativo=?",
-        (inv_id, cod_produto, id_estoque, ativo)
+        "SELECT * FROM contagens WHERE inventario_id=? AND cod_produto=? AND id_estoque=? AND ativo=? AND lote=?",
+        (inv_id, cod_produto, id_estoque, ativo, lote or "")
     )
     row = _fetchone(cur); conn.close()
     return row
@@ -321,7 +473,8 @@ except Exception as e:
 for k, v in {
     "inv_id": None, "inv_nome": "", "operador": "", "produto": None,
     "ultimo_cod": "", "input_key": 0, "permitir_recontagem": False,
-    "linha_selecionada": None  # índice da linha escolhida quando há múltiplos patrimônios
+    "linha_selecionada": None,  # índice da linha escolhida quando há múltiplos patrimônios
+    "pag_base4": 1,             # página atual da Aba 4
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -374,9 +527,31 @@ with st.sidebar:
     if st.session_state.inv_id:
         st.divider()
         df_cnt_side = listar_contagens(st.session_state.inv_id)
-        st.metric("📋 Itens na base",      len(df_estoque))
-        st.metric("✅ Contados",           len(df_cnt_side))
-        st.metric("⏳ Pendentes",          max(0, len(df_estoque) - len(df_cnt_side)))
+        _total_base = max(1, len(df_estoque))
+        _contados   = len(df_cnt_side)
+        _pendentes  = max(0, len(df_estoque) - _contados)
+        _pct        = _contados / _total_base
+
+        st.metric("📋 Itens na base",  len(df_estoque))
+        st.metric("✅ Contados",        _contados)
+        st.metric("⏳ Pendentes",       _pendentes)
+
+        # Barra de progresso visual
+        st.markdown(
+            f"<div style='margin-top:10px'>"
+            f"<div style='font-size:11px;color:#90caf9;font-weight:700;"
+            f"text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px'>"
+            f"Progresso da Contagem</div>"
+            f"<div style='background:rgba(255,255,255,0.15);border-radius:8px;"
+            f"height:10px;overflow:hidden'>"
+            f"<div style='background:linear-gradient(90deg,#43a047,#66bb6a);"
+            f"width:{_pct*100:.1f}%;height:100%;border-radius:8px;"
+            f"transition:width 0.4s ease'></div></div>"
+            f"<div style='font-size:13px;color:#e8eaf6;font-weight:700;margin-top:5px'>"
+            f"{_pct*100:.1f}% concluído</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
     st.divider()
     with st.expander("📂 Carregar / Atualizar Estoque"):
@@ -406,10 +581,37 @@ with st.sidebar:
 # ══════════════════════════════════════════════════════════════════════════════
 # TÍTULO
 # ══════════════════════════════════════════════════════════════════════════════
-st.title("📦 Contagem Estoque Fisico - Tel Ribeirão Preto")
+st.markdown(
+    """
+    <div style="background:linear-gradient(135deg,#0d1b4b 0%,#1565c0 65%,#1976d2 100%);
+                border-radius:18px;padding:22px 32px;margin-bottom:6px;
+                box-shadow:0 6px 28px rgba(13,27,75,0.35)">
+      <div style="display:flex;align-items:center;gap:18px">
+        <span style="font-size:52px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.3))">📦</span>
+        <div>
+          <div style="font-size:24px;font-weight:900;color:#ffffff;
+                      letter-spacing:-0.5px;line-height:1.2;
+                      text-shadow:0 1px 4px rgba(0,0,0,0.3)">
+            Contagem de Estoque Físico
+          </div>
+          <div style="font-size:13px;color:#90caf9;margin-top:5px;font-weight:500;
+                      letter-spacing:0.3px">
+            Tel Ribeirão Preto &nbsp;·&nbsp; Sistema de Inventário
+          </div>
+        </div>
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 if st.session_state.inv_id:
-    st.success(f"Inventário ativo: **{st.session_state.inv_nome}**")
+    st.markdown(
+        f"<div style='background:#e8f5e9;border-left:5px solid #43a047;"
+        f"border-radius:10px;padding:10px 16px;margin-top:6px;font-size:15px'>"
+        f"🟢 &nbsp;<b>Inventário ativo:</b> {st.session_state.inv_nome}</div>",
+        unsafe_allow_html=True,
+    )
 else:
     st.warning("⚠️ Nenhum inventário ativo. Crie ou selecione um na barra lateral.")
 
@@ -444,6 +646,75 @@ with aba1:
         buscar = st.button("🔎 Buscar", type="primary", use_container_width=True)
         cod = codigo.strip()
 
+        # ── Leitor de câmera ──────────────────────────────────────────────────
+        with st.expander("📷 Ler QR Code / Código de Barras"):
+            _tab_qr, _tab_foto = st.tabs(["📷 QR Code ao vivo", "📸 Foto (todos os formatos)"])
+
+            # ── Tab 1: scanner ao vivo via câmera ──────────────────────────────
+            with _tab_qr:
+                st.caption(
+                    "Aponte a câmera para o QR Code — leitura automática, sem tirar foto.\n"
+                    "⚠️ Requer conexão HTTPS (funciona no Streamlit Cloud e localhost)."
+                )
+                try:
+                    from streamlit_qrcode_scanner import qrcode_scanner as _qr_scanner
+                    _qr_result = _qr_scanner(key=f"qr_{st.session_state.input_key}")
+                    if _qr_result:
+                        _cod_cam = str(_qr_result).strip()
+                        st.success(f"✅ Código lido: **{_cod_cam}**")
+                        st.session_state.ultimo_cod          = _cod_cam
+                        st.session_state.linha_selecionada   = None
+                        st.session_state.permitir_recontagem = False
+                        _res_cam = buscar_produto(df_estoque, _cod_cam, est_filtro)
+                        st.session_state.produto = _res_cam if not _res_cam.empty else None
+                        if _res_cam.empty:
+                            st.error(f"❌ Produto **{_cod_cam}** não encontrado na base.")
+                        st.rerun()
+                except ImportError:
+                    st.warning(
+                        "Pacote não instalado. Execute:\n```\npip install streamlit-qrcode-scanner\n```"
+                    )
+
+            # ── Tab 2: foto → pyzbar (Code128, EAN, QR e outros) ───────────────
+            with _tab_foto:
+                st.caption(
+                    "📱 **Celular:** Procurar arquivos → **Câmera** → fotografar a etiqueta\n"
+                    "🖥️ **PC:** selecionar imagem salva — suporta QR Code e código de barras."
+                )
+                _img_arq = st.file_uploader(
+                    "foto",
+                    type=["jpg", "jpeg", "png", "webp", "bmp"],
+                    key=f"cam_{st.session_state.input_key}",
+                    label_visibility="collapsed",
+                )
+                if _img_arq is not None:
+                    try:
+                        from PIL import Image
+                        from pyzbar import pyzbar as _pyzbar
+                        _decoded = _pyzbar.decode(Image.open(_img_arq).convert("RGB"))
+                        if _decoded:
+                            _cod_cam = _decoded[0].data.decode("utf-8").strip()
+                            st.success(f"✅ Código identificado: **{_cod_cam}**")
+                            st.session_state.ultimo_cod          = _cod_cam
+                            st.session_state.linha_selecionada   = None
+                            st.session_state.permitir_recontagem = False
+                            _res_cam = buscar_produto(df_estoque, _cod_cam, est_filtro)
+                            st.session_state.produto = _res_cam if not _res_cam.empty else None
+                            if _res_cam.empty:
+                                st.error(f"❌ Produto **{_cod_cam}** não encontrado na base.")
+                            st.rerun()
+                        else:
+                            st.warning(
+                                "⚠️ Código não identificado. Dicas:\n"
+                                "- Aproxime mais a câmera da etiqueta\n"
+                                "- Melhore a iluminação\n"
+                                "- Evite reflexos ou sombras"
+                            )
+                    except ImportError:
+                        st.error("❌ Execute: `pip install pyzbar Pillow`")
+                    except Exception as _e:
+                        st.error(f"❌ Erro ao processar imagem: {_e}")
+
         # Nova busca → zera seleção anterior
         if cod and (cod != st.session_state.ultimo_cod or buscar):
             st.session_state.ultimo_cod       = cod
@@ -473,12 +744,14 @@ with aba1:
                         qtd_total_sistema += float(str(_r.get("Qtd Estoque", "0")).replace(",", "."))
                     except Exception:
                         pass
-                contados_ate_agora = sum(
-                    1 for _, _r in df_p.iterrows()
-                    for _pat in [str(_r.get("Ativo", "")).strip()]
-                    for _as in [_pat if _pat.upper() not in ["", "NAN", "NONE"] else ("Ativo" if interpretar_ativo(_pat) else "Inativo")]
-                    if buscar_contagem_existente(st.session_state.inv_id, _r["Cód. Produto"], _r["Id. Estoq. Físico"], _as)
-                )
+                contados_ate_agora = 0
+                for _, _r in df_p.iterrows():
+                    _pat = str(_r.get("Ativo", "")).strip()
+                    _as  = _pat if _pat.upper() not in ["", "NAN", "NONE"] else ("Ativo" if interpretar_ativo(_pat) else "Inativo")
+                    _lt  = str(_r.get("Lote", "")).strip()
+                    _lt  = "" if _lt.upper() in ["NAN", "NONE"] else _lt
+                    if buscar_contagem_existente(st.session_state.inv_id, _r["Cód. Produto"], _r["Id. Estoq. Físico"], _as, _lt):
+                        contados_ate_agora += 1
 
                 st.markdown(
                     f"<div style='background:#fff8e1;border-left:5px solid #f9a825;"
@@ -510,9 +783,11 @@ with aba1:
                         tem_pat  = pat.upper() not in ["", "NAN", "NONE"]
                         ativo_ok_r = interpretar_ativo(pat)
                         asalvo_r = pat if tem_pat else ("Ativo" if ativo_ok_r else "Inativo")
+                        lote_r   = str(row.get("Lote", "")).strip()
+                        lote_r   = "" if lote_r.upper() in ["NAN", "NONE"] else lote_r
                         ja_r = buscar_contagem_existente(
                             st.session_state.inv_id,
-                            row["Cód. Produto"], row["Id. Estoq. Físico"], asalvo_r
+                            row["Cód. Produto"], row["Id. Estoq. Físico"], asalvo_r, lote_r
                         )
                         try:
                             qtd_sist_r = float(str(row.get("Qtd Estoque", "0")).replace(",", "."))
@@ -525,19 +800,37 @@ with aba1:
                         badge_bg  = "#c8e6c9" if ja_r else "#bbdefb"
                         badge_cor = "#2e7d32" if ja_r else "#1565c0"
 
+                        # HTML do identificador (patrimônio e/ou lote)
+                        _ident_html = ""
+                        if tem_pat:
+                            _ident_html += (
+                                f"<div style='margin-top:6px;background:#fff9c4;border:1px solid #f9a825;"
+                                f"border-radius:8px;padding:6px 12px;display:inline-block;margin-right:8px'>"
+                                f"<span style='font-size:11px;color:#795548'>🏷️ PATRIMÔNIO: </span>"
+                                f"<span style='font-size:20px;font-weight:900;color:#e65100'>{pat}</span></div>"
+                            )
+                        if lote_r:
+                            _ident_html += (
+                                f"<div style='margin-top:6px;background:#e8f5e9;border:1px solid #66bb6a;"
+                                f"border-radius:8px;padding:6px 12px;display:inline-block'>"
+                                f"<span style='font-size:11px;color:#2e7d32'>📦 LOTE: </span>"
+                                f"<span style='font-size:20px;font-weight:900;color:#1b5e20'>{lote_r}</span></div>"
+                            )
+                        if not tem_pat and not lote_r:
+                            _ident_html = (
+                                "<div style='margin-top:6px;background:#f5f5f5;border-radius:8px;"
+                                "padding:6px 12px;display:inline-block;color:#9e9e9e;font-size:14px'>"
+                                "Sem patrimônio ou lote</div>"
+                            )
                         st.markdown(
                             f"<div style='border:2px solid {borda};background:{bg};"
                             f"border-radius:12px;padding:12px 16px;margin-bottom:4px'>"
                             f"<div style='display:flex;justify-content:space-between;align-items:center'>"
-                            f"<span style='font-weight:700;font-size:15px'>Patrimônio {idx+1}</span>"
+                            f"<span style='font-weight:700;font-size:15px'>Item {idx+1}</span>"
                             f"<span style='background:{badge_bg};color:{badge_cor};padding:2px 10px;"
                             f"border-radius:12px;font-size:11px;font-weight:700'>{badge_txt}</span></div>"
-                            f"<div style='margin-top:6px;background:#fff9c4;border:1px solid #f9a825;"
-                            f"border-radius:8px;padding:6px 12px;display:inline-block'>"
-                            f"<span style='font-size:11px;color:#795548'>Nº PATRIMÔNIO: </span>"
-                            f"<span style='font-size:20px;font-weight:900;color:#e65100'>"
-                            f"{pat if tem_pat else '—'}</span></div>"
-                            f"<div style='font-size:12px;color:#555;margin-top:6px'>"
+                            + _ident_html
+                            + f"<div style='font-size:12px;color:#555;margin-top:6px'>"
                             f"📍 {row['Id. Estoq. Físico']} | "
                             f"Qtd Sistema: <b>{qtd_sist_r:.0f}</b> {row.get('Unid. Medida','')}"
                             + (f" | ✅ Já contado: <b>{ja_r['qtd_contada']:.0f}</b> em {ja_r['data_hora'][:16]}" if ja_r else "")
@@ -561,7 +854,7 @@ with aba1:
                                 value=obs_default,
                                 key=f"obs_multi_{idx}_{st.session_state.input_key}"
                             )
-                        entradas.append((idx, row, asalvo_r, qtd_sist_r, qtd_val, obs_val))
+                        entradas.append((idx, row, asalvo_r, lote_r, qtd_sist_r, qtd_val, obs_val))
                         st.divider()
 
                     submitted = st.form_submit_button(
@@ -571,7 +864,7 @@ with aba1:
 
                     if submitted:
                         salvos = 0
-                        for idx, row, asalvo_r, qtd_sist_r, qtd_val, obs_val in entradas:
+                        for idx, row, asalvo_r, lote_r, qtd_sist_r, qtd_val, obs_val in entradas:
                             diferenca = qtd_val - qtd_sist_r
                             dados = {
                                 "id_estoque":   row["Id. Estoq. Físico"],
@@ -583,6 +876,7 @@ with aba1:
                                 "qtd_contada":  qtd_val,
                                 "diferenca":    diferenca,
                                 "ativo":        asalvo_r,
+                                "lote":         lote_r,
                                 "observacao":   obs_val,
                             }
                             salvar_contagem(st.session_state.inv_id, dados, st.session_state.operador)
@@ -593,7 +887,7 @@ with aba1:
                         st.session_state.linha_selecionada   = None
                         st.session_state.permitir_recontagem = False
                         st.session_state.input_key          += 1
-                        st.success(f"✅ {salvos} patrimônios registrados com sucesso!")
+                        st.toast(f"✅ {salvos} patrimônio(s) registrado(s)!", icon="✅")
                         st.rerun()
 
                 # Botão cancelar fora do form
@@ -619,6 +913,8 @@ with aba1:
                 ativo_ok         = interpretar_ativo(ativo_num)
                 badge            = "🟢 Ativo" if ativo_ok else "🔴 Inativo"
                 ativo_salvo      = ativo_num if ativo_tem_numero else ("Ativo" if ativo_ok else "Inativo")
+                lote_val         = str(linha.get("Lote", "")).strip()
+                lote_val         = "" if lote_val.upper() in ["NAN", "NONE"] else lote_val
 
                 # ── Card do produto ──────────────────────────────────────────
                 with st.container(border=True):
@@ -639,6 +935,15 @@ with aba1:
                             f"{ativo_num}</span></div>",
                             unsafe_allow_html=True
                         )
+                    if lote_val:
+                        st.markdown(
+                            f"<div style='background:#e8f5e9;border:1px solid #66bb6a;"
+                            f"border-radius:8px;padding:10px 16px;margin-top:8px'>"
+                            f"<span style='font-size:12px;color:#2e7d32'>📦 LOTE</span><br>"
+                            f"<span style='font-size:28px;font-weight:900;color:#1b5e20'>"
+                            f"{lote_val}</span></div>",
+                            unsafe_allow_html=True
+                        )
 
                     qtd_sist_raw = linha.get("Qtd Estoque", "0")
                     try:
@@ -652,7 +957,7 @@ with aba1:
                 # ── Trava: item já contado? ──────────────────────────────────
                 ja_contado = buscar_contagem_existente(
                     st.session_state.inv_id,
-                    linha["Cód. Produto"], linha["Id. Estoq. Físico"], ativo_salvo
+                    linha["Cód. Produto"], linha["Id. Estoq. Físico"], ativo_salvo, lote_val
                 )
 
                 if ja_contado and not st.session_state.permitir_recontagem:
@@ -709,12 +1014,15 @@ with aba1:
                                 "qtd_contada":  qtd_contada,
                                 "diferenca":    diferenca,
                                 "ativo":        ativo_salvo,
+                                "lote":         lote_val,
                                 "observacao":   obs,
                             }
                             salvar_contagem(st.session_state.inv_id, dados, st.session_state.operador)
 
                             sinal   = "+" if diferenca >= 0 else ""
                             pat_reg = f" | Pat: {ativo_num}" if ativo_tem_numero else ""
+                            if lote_val:
+                                pat_reg += f" | Lote: {lote_val}"
                             acao    = "Corrigido" if ja_contado else "Registrado"
 
                             # Zera tudo para próxima leitura
@@ -724,10 +1032,11 @@ with aba1:
                             st.session_state.permitir_recontagem = False
                             st.session_state.input_key          += 1
 
-                            st.success(
-                                f"✅ {acao}! **{linha['Cód. Produto']}{pat_reg}** "
-                                f"— Diferença: {sinal}{diferenca:.0f}"
+                            _msg_toast = (
+                                f"✅ {acao}: {linha['Cód. Produto']}{pat_reg} "
+                                f"| Dif: {sinal}{diferenca:.0f}"
                             )
+                            st.toast(_msg_toast, icon="✅")
                             st.rerun()
             # ── bloco legado removido ──
 
@@ -848,11 +1157,34 @@ with aba2:
         if df_cur.empty:
             st.info("Nenhum item contado ainda neste inventário.")
         else:
+            _div_count = int((df_cur["diferenca"].astype(float) != 0).sum())
+            _qtd_cnt   = df_cur["qtd_contada"].astype(float).sum()
+            _qtd_sis   = df_cur["qtd_sistema"].astype(float).sum()
+            _diff_tot  = _qtd_cnt - _qtd_sis
+
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Total contado",   len(df_cur))
-            m2.metric("Com divergência", int((df_cur["diferenca"].astype(float) != 0).sum()))
-            m3.metric("Total contado",   f'{df_cur["qtd_contada"].astype(float).sum():.0f}')
-            m4.metric("Total sistema",   f'{df_cur["qtd_sistema"].astype(float).sum():.0f}')
+            m1.metric("📦 Itens contados",    len(df_cur))
+            m2.metric("⚠️ Com divergência",    _div_count)
+            m3.metric("🔢 Qtd total contada",  f"{_qtd_cnt:.0f}")
+            m4.metric("📋 Qtd total sistema",  f"{_qtd_sis:.0f}",
+                      delta=f"{_diff_tot:+.0f}", delta_color="inverse")
+
+            if _div_count > 0:
+                _pct_div = _div_count / max(1, len(df_cur)) * 100
+                st.markdown(
+                    f"<div style='background:#fff3e0;border-left:5px solid #fb8c00;"
+                    f"border-radius:12px;padding:12px 18px;margin:10px 0;"
+                    f"display:flex;align-items:center;gap:16px'>"
+                    f"<span style='font-size:28px'>⚠️</span>"
+                    f"<div>"
+                    f"<div style='font-weight:700;font-size:15px;color:#e65100'>"
+                    f"{_div_count} ite{'m' if _div_count==1 else 'ns'} com divergência "
+                    f"({_pct_div:.0f}% do total)</div>"
+                    f"<div style='font-size:13px;color:#bf360c;margin-top:2px'>"
+                    f"Diferença acumulada: <b>{_diff_tot:+.0f}</b> unidades</div>"
+                    f"</div></div>",
+                    unsafe_allow_html=True,
+                )
 
             flt = st.selectbox("Filtrar estoque", ["Todos"] + sorted(df_cur["id_estoque"].unique().tolist()))
             df_v = df_cur if flt == "Todos" else df_cur[df_cur["id_estoque"] == flt]
@@ -953,49 +1285,80 @@ with aba4:
         )
         df_v4 = df_v4[mask]
 
-    # ── Colorir linhas conforme status de contagem no inventário ativo ────────
+    # ── Coluna de status vinculada à linha (segura para ordenação) ───────────
     if st.session_state.inv_id and not df_v4.empty:
-        st.markdown(
-            "<div style='display:flex;gap:16px;margin-bottom:8px;align-items:center'>"
-            "<span style='background:#c8e6c9;color:#1b5e20;padding:3px 12px;"
-            "border-radius:8px;font-size:13px;font-weight:700'>🟢 Já contado</span>"
-            "<span style='background:#ffcdd2;color:#b71c1c;padding:3px 12px;"
-            "border-radius:8px;font-size:13px;font-weight:700'>🔴 Pendente</span>"
-            "</div>",
-            unsafe_allow_html=True
-        )
-
         df_cnt4 = listar_contagens(st.session_state.inv_id)
         if not df_cnt4.empty:
+            _lotes4 = df_cnt4["lote"].astype(str).str.strip() if "lote" in df_cnt4.columns else [""] * len(df_cnt4)
             contados_set = set(
                 zip(
                     df_cnt4["cod_produto"].astype(str).str.strip(),
                     df_cnt4["id_estoque"].astype(str).str.strip(),
                     df_cnt4["ativo"].astype(str).str.strip(),
+                    _lotes4,
                 )
             )
         else:
             contados_set = set()
 
-        def _cor_linha(row):
+        def _status_linha(row):
             pat = str(row.get("Ativo", "")).strip()
             tem_pat = pat.upper() not in ["", "NAN", "NONE"]
             ativo_ok_r = interpretar_ativo(pat)
             ativo_salvo_r = pat if tem_pat else ("Ativo" if ativo_ok_r else "Inativo")
+            lote_r = str(row.get("Lote", "")).strip()
+            lote_r = "" if lote_r.upper() in ["NAN", "NONE"] else lote_r
             chave = (
                 str(row["Cód. Produto"]).strip(),
                 str(row["Id. Estoq. Físico"]).strip(),
                 ativo_salvo_r,
+                lote_r,
             )
-            if chave in contados_set:
-                return ["background-color: #c8e6c9; color: #1b5e20"] * len(row)
-            return ["background-color: #ffcdd2; color: #b71c1c"] * len(row)
+            return "✅ Contado" if chave in contados_set else "⏳ Pendente"
 
-        st.dataframe(
-            df_v4.style.apply(_cor_linha, axis=1),
-            use_container_width=True, hide_index=True
-        )
+        df_exib = df_v4.copy().reset_index(drop=True)
+        df_exib.insert(0, "Status", df_exib.apply(_status_linha, axis=1))
+        df_final = df_exib
     else:
-        st.dataframe(df_v4, use_container_width=True, hide_index=True)
+        df_final = df_v4.copy().reset_index(drop=True)
 
-    st.caption(f"{len(df_v4)} itens exibidos | Arquivo: {ESTOQUE_FILE}")
+    # ── Paginação ─────────────────────────────────────────────────────────────
+    total_itens = len(df_final)
+    pc1, pc2 = st.columns([2, 1])
+    with pc1:
+        st.caption(f"**{total_itens}** itens encontrados | Arquivo: {os.path.basename(ESTOQUE_FILE)}")
+    with pc2:
+        por_pagina = st.select_slider(
+            "Itens por página", options=[25, 50, 100, 200], value=50, key="por_pag4"
+        )
+
+    total_pags = max(1, (total_itens + por_pagina - 1) // por_pagina)
+
+    # Reseta para página 1 quando filtro ou pesquisa mudam
+    _sig4 = f"{f_est}|{pesq}"
+    if st.session_state.get("_sig_aba4") != _sig4:
+        st.session_state["_sig_aba4"] = _sig4
+        st.session_state.pag_base4 = 1
+    # Garante que a página não ultrapasse o total (ex: após filtro mais restrito)
+    st.session_state.pag_base4 = min(st.session_state.pag_base4, total_pags)
+
+    pn1, pn2, pn3 = st.columns([1, 4, 1])
+    with pn1:
+        if st.button("◀ Anterior", disabled=st.session_state.pag_base4 <= 1,
+                     key="btn_p4_prev", use_container_width=True):
+            st.session_state.pag_base4 -= 1
+            st.rerun()
+    with pn2:
+        st.markdown(
+            f"<div style='text-align:center;padding:6px 0'>"
+            f"Página <b>{st.session_state.pag_base4}</b> de <b>{total_pags}</b></div>",
+            unsafe_allow_html=True
+        )
+    with pn3:
+        if st.button("Próxima ▶", disabled=st.session_state.pag_base4 >= total_pags,
+                     key="btn_p4_next", use_container_width=True):
+            st.session_state.pag_base4 += 1
+            st.rerun()
+
+    _ini = (st.session_state.pag_base4 - 1) * por_pagina
+    st.dataframe(df_final.iloc[_ini:_ini + por_pagina], use_container_width=True, hide_index=True)
