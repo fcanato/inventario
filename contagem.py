@@ -163,8 +163,11 @@ try:
 except NameError:
     BASE_DIR = os.path.abspath(os.getcwd())
 
-ESTOQUE_FILE = os.path.join(BASE_DIR, "estoque.xlsx")
-DB_FILE      = os.path.join(BASE_DIR, "contagem.db")
+DB_FILE = os.path.join(BASE_DIR, "contagem.db")
+
+def get_estoque_file(user_id):
+    """Retorna o caminho do arquivo de estoque isolado por usuário."""
+    return os.path.join(BASE_DIR, f"estoque_{user_id}.xlsx")
 
 # ── Detecção de modo: Supabase (PostgreSQL) ou SQLite local ───────────────────
 SUPABASE_URL = st.secrets.get("SUPABASE_URL", "") if hasattr(st, "secrets") else ""
@@ -594,10 +597,11 @@ def _norm_col(c: str) -> str:
 
 
 @st.cache_data(show_spinner="Carregando base de estoque...")
-def carregar_estoque():
-    if not os.path.exists(ESTOQUE_FILE):
+def carregar_estoque(user_id):
+    _file = get_estoque_file(user_id)
+    if not os.path.exists(_file):
         return pd.DataFrame()
-    df = pd.read_excel(ESTOQUE_FILE, dtype=str)
+    df = pd.read_excel(_file, dtype=str)
     df.columns = [_norm_col(c) for c in df.columns]
     for col in df.columns:
         df[col] = df[col].fillna("").str.strip()
@@ -620,16 +624,6 @@ def interpretar_ativo(valor):
     if v in ["N", "NAO", "NÃO", "INATIVO", "0", "FALSE", "F"]:
         return False
     return True       # S, SIM, ATIVO, 1, TRUE ou qualquer outro valor = ativo
-
-# ── Carrega estoque — sem o arquivo, exibe aviso de upload ───────────────────
-try:
-    df_estoque = carregar_estoque()
-    estoques_disponiveis = sorted(df_estoque["Id. Estoq. Físico"].unique().tolist()) if not df_estoque.empty else []
-except Exception as e:
-    st.error(f"❌ Erro ao carregar `estoque.xlsx`:\n\n{e}")
-    st.code(traceback.format_exc())
-    df_estoque = pd.DataFrame()
-    estoques_disponiveis = []
 
 # ── Session State ──────────────────────────────────────────────────────────────
 for k, v in {
@@ -713,6 +707,20 @@ if not st.session_state.usuario_logado:
 
 _user     = st.session_state.usuario_logado
 _is_admin = int(_user.get("is_admin") or 0) == 1
+
+# ── Carrega estoque isolado do usuário logado ──────────────────────────────────────────
+uid          = _user.get("id")
+_estoque_file = get_estoque_file(uid)
+try:
+    df_estoque = carregar_estoque(uid)
+    estoques_disponiveis = sorted(
+        df_estoque["Id. Estoq. Físico"].unique().tolist()
+    ) if not df_estoque.empty else []
+except Exception as e:
+    st.error(f"❌ Erro ao carregar base de estoque:\n\n{e}")
+    st.code(traceback.format_exc())
+    df_estoque = pd.DataFrame()
+    estoques_disponiveis = []
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
@@ -817,15 +825,18 @@ with st.sidebar:
             label_visibility="collapsed"
         )
         if uploaded is not None:
-            with open(ESTOQUE_FILE, "wb") as f:
+            with open(_estoque_file, "wb") as f:
                 f.write(uploaded.read())
-            st.cache_data.clear()
+            carregar_estoque.clear()
             st.success("✅ Estoque atualizado com sucesso!")
             st.rerun()
-        st.caption(f"Arquivo atual: `{os.path.basename(ESTOQUE_FILE)}`")
+        if os.path.exists(_estoque_file):
+            st.caption(f"Arquivo atual: `{os.path.basename(_estoque_file)}`")
+        else:
+            st.info("📂 Nenhuma base carregada. Faça o upload acima.")
 
     if st.button("🔄 Recarregar estoque", use_container_width=True):
-        st.cache_data.clear()
+        carregar_estoque.clear()
         st.rerun()
 
     st.divider()
@@ -891,7 +902,7 @@ with aba1:
         st.info("Selecione ou crie um inventário na barra lateral para começar.")
     else:
         if df_estoque.empty:
-            st.warning("⚠️ Nenhuma base de estoque carregada. Faça o upload do arquivo `estoque.xlsx` na barra lateral (📂 Carregar / Atualizar Estoque).")
+            st.warning("⚠️ Nenhuma base de estoque carregada. Faça o upload do seu arquivo Excel na barra lateral (📂 Carregar / Atualizar Estoque).")
         # ── Campo de busca ────────────────────────────────────────────────────
         # Máscara JS: insere hífen automaticamente a cada 4 caracteres digitados
         st.html("""<script>(function(){
@@ -1587,7 +1598,8 @@ with aba4:
     total_itens = len(df_final)
     pc1, pc2 = st.columns([2, 1])
     with pc1:
-        st.caption(f"**{total_itens}** itens encontrados | Arquivo: {os.path.basename(ESTOQUE_FILE)}")
+        _arq_txt = f" | Arquivo: {os.path.basename(_estoque_file)}" if os.path.exists(_estoque_file) else ""
+        st.caption(f"**{total_itens}** itens encontrados{_arq_txt}")
     with pc2:
         por_pagina = st.select_slider(
             "Itens por página", options=[25, 50, 100, 200], value=50, key="por_pag4"
