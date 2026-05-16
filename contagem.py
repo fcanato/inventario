@@ -5,6 +5,8 @@ import os
 import io
 import traceback
 import unicodedata
+import hashlib
+import secrets
 from datetime import datetime, date
 
 try:
@@ -168,6 +170,10 @@ DB_FILE      = os.path.join(BASE_DIR, "contagem.db")
 SUPABASE_URL = st.secrets.get("SUPABASE_URL", "") if hasattr(st, "secrets") else ""
 USE_PG = bool(SUPABASE_URL and PSYCOPG2_OK)
 
+# ── Configurações de autenticação ─────────────────────────────────────────────
+ADMIN_USUARIO   = (st.secrets.get("ADMIN_USUARIO", "admin") if hasattr(st, "secrets") else "admin")
+ADMIN_SENHA_DEF = (st.secrets.get("ADMIN_SENHA", "Admin@2026")  if hasattr(st, "secrets") else "Admin@2026")
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CAMADA DE BANCO — funções que abstraem SQLite ↔ PostgreSQL
 # ══════════════════════════════════════════════════════════════════════════════
@@ -236,6 +242,19 @@ def init_db():
         cur.execute(
             "ALTER TABLE contagens ADD COLUMN IF NOT EXISTS lote TEXT DEFAULT ''"
         )
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id            SERIAL PRIMARY KEY,
+                username      TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                salt          TEXT NOT NULL,
+                is_admin      INTEGER DEFAULT 0,
+                created_at    TEXT
+            )
+        """)
+        cur.execute(
+            "ALTER TABLE inventarios ADD COLUMN IF NOT EXISTS usuario_id INTEGER DEFAULT NULL"
+        )
         conn.commit()
         cur.close()
         conn.close()
@@ -249,7 +268,16 @@ def init_db():
             descricao   TEXT,
             data_inicio TEXT NOT NULL,
             data_fim    TEXT,
-            status      TEXT DEFAULT 'Aberto'
+            status      TEXT DEFAULT 'Aberto',
+            usuario_id  INTEGER DEFAULT NULL
+        );
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            username      TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            salt          TEXT NOT NULL,
+            is_admin      INTEGER DEFAULT 0,
+            created_at    TEXT
         );
         CREATE TABLE IF NOT EXISTS contagens (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -282,7 +310,8 @@ def init_db():
                 descricao   TEXT,
                 data_inicio TEXT NOT NULL,
                 data_fim    TEXT,
-                status      TEXT DEFAULT 'Aberto'
+                status      TEXT DEFAULT 'Aberto',
+                usuario_id  INTEGER DEFAULT NULL
             );
             CREATE TABLE contagens (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -309,32 +338,126 @@ def init_db():
     if "lote" not in cols_now:
         conn.execute("ALTER TABLE contagens ADD COLUMN lote TEXT DEFAULT ''")
         conn.commit()
+    # Migração: adiciona coluna usuario_id em inventarios
+    cols_inv = [r[1] for r in conn.execute("PRAGMA table_info(inventarios)").fetchall()]
+    if "usuario_id" not in cols_inv:
+        conn.execute("ALTER TABLE inventarios ADD COLUMN usuario_id INTEGER DEFAULT NULL")
+        conn.commit()
+    # Cria tabela usuarios se não existir
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            username      TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            salt          TEXT NOT NULL,
+            is_admin      INTEGER DEFAULT 0,
+            created_at    TEXT
+        )
+    """)
+    conn.commit()
     conn.close()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AUTENTICAÇÃO
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _hash_senha(senha: str, salt: str = None):
+    if salt is None:
+        salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", senha.encode("utf-8"), salt.encode("utf-8"), 260_000)
+    return dk.hex(), salt
+
+def cadastrar_usuario(username: str, senha: str, is_admin: bool = False):
+    pw_hash, salt = _hash_senha(senha)
+    agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_conn()
+    try:
+        _execute(conn,
+            "INSERT INTO usuarios (username, password_hash, salt, is_admin, created_at) VALUES (?,?,?,?,?)",
+            (username.strip().lower(), pw_hash, salt, 1 if is_admin else 0, agora)
+        )
+        conn.commit()
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+    finally:
+        conn.close()
+
+def autenticar_usuario(username: str, senha: str):
+    conn = get_conn()
+    cur = _execute(conn, "SELECT * FROM usuarios WHERE username=?", (username.strip().lower(),))
+    row = _fetchone(cur)
+    conn.close()
+    if row is None:
+        return None
+    pw_hash, _ = _hash_senha(senha, row["salt"])
+    if pw_hash == row["password_hash"]:
+        return row
+    return None
+
+def listar_usuarios():
+    conn = get_conn()
+    if USE_PG:
+        cur = conn.cursor()
+        cur.execute("SELECT id, username, is_admin, created_at FROM usuarios ORDER BY id")
+        rows = _fetchall(cur); cur.close(); conn.close()
+        return pd.DataFrame(rows) if rows else pd.DataFrame(
+            columns=["id", "username", "is_admin", "created_at"])
+    df = pd.read_sql(
+        "SELECT id, username, is_admin, created_at FROM usuarios ORDER BY id", conn)
+    conn.close()
+    return df
+
+def alterar_senha_usuario(usuario_id: int, nova_senha: str):
+    pw_hash, salt = _hash_senha(nova_senha)
+    conn = get_conn()
+    _execute(conn, "UPDATE usuarios SET password_hash=?, salt=? WHERE id=?",
+             (pw_hash, salt, usuario_id))
+    conn.commit(); conn.close()
+
+def deletar_usuario(usuario_id: int):
+    conn = get_conn()
+    cur = _execute(conn, "SELECT id FROM inventarios WHERE usuario_id=?", (usuario_id,))
+    inv_ids = [r["id"] for r in _fetchall(cur)]
+    for inv_id in inv_ids:
+        _execute(conn, "DELETE FROM contagens WHERE inventario_id=?", (inv_id,))
+    _execute(conn, "DELETE FROM inventarios WHERE usuario_id=?", (usuario_id,))
+    _execute(conn, "DELETE FROM usuarios WHERE id=?", (usuario_id,))
+    conn.commit(); conn.close()
+
+def _ensure_admin():
+    """Cria o usuário admin padrão se ainda não existe."""
+    conn = get_conn()
+    cur = _execute(conn, "SELECT id FROM usuarios WHERE username=?", (ADMIN_USUARIO,))
+    existe = _fetchone(cur); conn.close()
+    if not existe:
+        cadastrar_usuario(ADMIN_USUARIO, ADMIN_SENHA_DEF, is_admin=True)
 
 # Inicializa banco — erros aparecem no frontend
 try:
     init_db()
+    _ensure_admin()
 except Exception as e:
     st.error(f"❌ Erro ao inicializar banco de dados:\n\n{e}")
     st.code(traceback.format_exc())
     st.stop()
 
 # ── Funções de Inventário ──────────────────────────────────────────────────────
-def criar_inventario(nome, descricao):
+def criar_inventario(nome, descricao, usuario_id=None):
     conn = get_conn()
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if USE_PG:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO inventarios (nome, descricao, data_inicio, status) VALUES (%s,%s,%s,%s) RETURNING id",
-            (nome, descricao, agora, "Aberto")
+            "INSERT INTO inventarios (nome, descricao, data_inicio, status, usuario_id) VALUES (%s,%s,%s,%s,%s) RETURNING id",
+            (nome, descricao, agora, "Aberto", usuario_id)
         )
         novo_id = cur.fetchone()["id"]
         conn.commit(); cur.close(); conn.close()
     else:
         cur = _execute(conn,
-            "INSERT INTO inventarios (nome, descricao, data_inicio, status) VALUES (?,?,?,?)",
-            (nome, descricao, agora, "Aberto")
+            "INSERT INTO inventarios (nome, descricao, data_inicio, status, usuario_id) VALUES (?,?,?,?,?)",
+            (nome, descricao, agora, "Aberto", usuario_id)
         )
         conn.commit(); novo_id = cur.lastrowid; conn.close()
     return novo_id
@@ -356,15 +479,33 @@ def deletar_inventario(inv_id):
     _execute(conn, "DELETE FROM inventarios WHERE id=?", (inv_id,))
     conn.commit(); conn.close()
 
-def listar_inventarios():
+def listar_inventarios(usuario_id=None, todos=False):
+    _cols = ["id", "nome", "descricao", "data_inicio", "data_fim", "status",
+             "usuario_id", "usuario_nome"]
     conn = get_conn()
+    if todos:
+        sql    = ("SELECT i.*, u.username AS usuario_nome "
+                  "FROM inventarios i LEFT JOIN usuarios u ON i.usuario_id = u.id "
+                  "ORDER BY i.id DESC")
+        params = ()
+    elif usuario_id is not None:
+        sql    = ("SELECT i.*, u.username AS usuario_nome "
+                  "FROM inventarios i LEFT JOIN usuarios u ON i.usuario_id = u.id "
+                  "WHERE i.usuario_id=? ORDER BY i.id DESC")
+        params = (usuario_id,)
+    else:
+        conn.close()
+        return pd.DataFrame(columns=_cols)
     if USE_PG:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM inventarios ORDER BY id DESC")
-        rows = _fetchall(cur)
-        cur.close(); conn.close()
-        return pd.DataFrame(rows) if rows else pd.DataFrame(columns=["id","nome","descricao","data_inicio","data_fim","status"])
-    df = pd.read_sql("SELECT * FROM inventarios ORDER BY id DESC", conn)
+        pg_sql = sql.replace("?", "%s")
+        cur.execute(pg_sql, params) if params else cur.execute(pg_sql)
+        rows = _fetchall(cur); cur.close(); conn.close()
+        return pd.DataFrame(rows) if rows else pd.DataFrame(columns=_cols)
+    if params:
+        df = pd.read_sql(sql, conn, params=params)
+    else:
+        df = pd.read_sql(sql, conn)
     conn.close()
     return df
 
@@ -395,7 +536,11 @@ def salvar_contagem(inv_id, dados, operador):
              lote, dados["observacao"], operador, agora)
         )
     conn.commit(); conn.close()
+    # Invalida cache para que a próxima leitura reflita os dados recém-salvos
+    listar_contagens.clear()
+    contar_contagens.clear()
 
+@st.cache_data(ttl=30, show_spinner=False)
 def listar_contagens(inv_id):
     conn = get_conn()
     if USE_PG:
@@ -406,6 +551,15 @@ def listar_contagens(inv_id):
     df = pd.read_sql("SELECT * FROM contagens WHERE inventario_id=? ORDER BY data_hora DESC", conn, params=(inv_id,))
     conn.close()
     return df
+
+@st.cache_data(ttl=30, show_spinner=False)
+def contar_contagens(inv_id):
+    """Retorna o total de itens contados sem carregar o DataFrame completo."""
+    conn = get_conn()
+    cur = _execute(conn, "SELECT COUNT(*) AS cnt FROM contagens WHERE inventario_id=?", (inv_id,))
+    row = _fetchone(cur)
+    conn.close()
+    return int(row["cnt"]) if row else 0
 
 def buscar_contagem_existente(inv_id, cod_produto, id_estoque, ativo, lote=""):
     conn = get_conn()
@@ -483,19 +637,111 @@ for k, v in {
     "ultimo_cod": "", "input_key": 0, "permitir_recontagem": False,
     "linha_selecionada": None,  # índice da linha escolhida quando há múltiplos patrimônios
     "pag_base4": 1,             # página atual da Aba 4
+    "usuario_logado": None,     # dict do usuário autenticado ou None
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
 # ══════════════════════════════════════════════════════════════════════════════
+# TELA DE LOGIN
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _render_tela_login():
+    st.markdown(
+        """
+        <div style="text-align:center;padding:48px 0 24px">
+          <div style="font-size:60px">📦</div>
+          <div style="font-size:28px;font-weight:900;color:#1a237e;line-height:1.2">
+            Contagem de Estoque
+          </div>
+          <div style="font-size:13px;color:#546e7a;margin-top:6px">
+            Tel Telecomunicações &nbsp;·&nbsp; Contagem de Estoque Físico
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    _, col_form, _ = st.columns([1, 2, 1])
+    with col_form:
+        tab_login, tab_cadastro = st.tabs(["🔐 Entrar", "📝 Cadastrar-se"])
+
+        with tab_login:
+            with st.form("form_login"):
+                _uname = st.text_input("👤 Usuário", placeholder="seu.usuario")
+                _pwd   = st.text_input("🔑 Senha", type="password")
+                _enter = st.form_submit_button(
+                    "Entrar", type="primary", use_container_width=True)
+            if _enter:
+                if not _uname.strip():
+                    st.error("Informe o usuário.")
+                else:
+                    user = autenticar_usuario(_uname, _pwd)
+                    if user:
+                        st.session_state.usuario_logado = dict(user)
+                        st.rerun()
+                    else:
+                        st.error("❌ Usuário ou senha inválidos.")
+
+        with tab_cadastro:
+            with st.form("form_cadastro"):
+                _nu  = st.text_input("👤 Usuário desejado", placeholder="mínimo 3 caracteres")
+                _np  = st.text_input("🔑 Senha", type="password", key="cp_senha")
+                _np2 = st.text_input("🔑 Confirmar senha", type="password")
+                _cad = st.form_submit_button(
+                    "Cadastrar", type="primary", use_container_width=True)
+            if _cad:
+                nu = _nu.strip().lower()
+                if len(nu) < 3:
+                    st.error("Usuário deve ter ao menos 3 caracteres.")
+                elif len(_np) < 6:
+                    st.error("Senha deve ter ao menos 6 caracteres.")
+                elif _np != _np2:
+                    st.error("As senhas não coincidem.")
+                else:
+                    ok, msg = cadastrar_usuario(nu, _np, is_admin=False)
+                    if ok:
+                        st.success("✅ Conta criada! Faça login na aba 🔐 Entrar.")
+                    else:
+                        if "UNIQUE" in msg.upper():
+                            st.error("❌ Este usuário já existe. Escolha outro nome.")
+                        else:
+                            st.error(f"❌ Erro: {msg}")
+
+if not st.session_state.usuario_logado:
+    _render_tela_login()
+    st.stop()
+
+_user     = st.session_state.usuario_logado
+_is_admin = int(_user.get("is_admin") or 0) == 1
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
 # ══════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
+    # ── Cabeçalho do usuário logado ───────────────────────────────────────────
+    _nome_exib = _user.get("username", "–").upper()
+    st.markdown(
+        f"<div style='background:rgba(255,255,255,0.15);border-radius:10px;"
+        f"padding:10px 14px;margin-bottom:4px'>"
+        f"<div style='font-size:10px;color:#90caf9;font-weight:700;text-transform:uppercase;"
+        f"letter-spacing:0.5px'>Usuário logado</div>"
+        f"<div style='font-size:16px;font-weight:900;color:#fff;margin-top:2px'>"
+        f"👤 {_nome_exib}</div>"
+        + (f"<div style='font-size:11px;color:#ffcc02;font-weight:700;margin-top:2px'>"
+           f"⭐ Administrador</div>" if _is_admin else "")
+        + f"</div>",
+        unsafe_allow_html=True,
+    )
+    if st.button("🚪 Sair", use_container_width=True):
+        st.session_state.usuario_logado = None
+        st.session_state.inv_id = None
+        st.rerun()
+
     st.title("📦 Contagem de Estoque")
     st.divider()
 
     st.header("🗂️ Inventário Ativo")
-    df_inv = listar_inventarios()
+    df_inv = listar_inventarios(usuario_id=_user.get("id"), todos=_is_admin)
     abertos = df_inv[df_inv["status"] == "Aberto"] if not df_inv.empty else pd.DataFrame()
 
     if not abertos.empty:
@@ -513,7 +759,10 @@ with st.sidebar:
         desc_inv = st.text_input("Descrição (opcional)")
         if st.button("Criar", type="primary", use_container_width=True):
             if nome_inv.strip():
-                nid = criar_inventario(nome_inv.strip(), desc_inv.strip())
+                nid = criar_inventario(
+                    nome_inv.strip(), desc_inv.strip(),
+                    st.session_state.usuario_logado.get("id")
+                )
                 st.session_state.inv_id   = nid
                 st.session_state.inv_nome = nome_inv.strip()
                 st.success(f"Inventário #{nid} criado!")
@@ -534,9 +783,8 @@ with st.sidebar:
 
     if st.session_state.inv_id:
         st.divider()
-        df_cnt_side = listar_contagens(st.session_state.inv_id)
         _total_base = max(1, len(df_estoque))
-        _contados   = len(df_cnt_side)
+        _contados   = contar_contagens(st.session_state.inv_id)
         _pendentes  = max(0, len(df_estoque) - _contados)
         _pct        = _contados / _total_base
 
@@ -604,7 +852,7 @@ st.markdown(
           </div>
           <div style="font-size:13px;color:#90caf9;margin-top:5px;font-weight:500;
                       letter-spacing:0.3px">
-            Tel Ribeirão Preto &nbsp;·&nbsp; Sistema de Inventário
+            Tel Telecomunicações &nbsp;·&nbsp; Contagem de Estoque Físico
           </div>
         </div>
       </div>
@@ -626,13 +874,17 @@ else:
 # ══════════════════════════════════════════════════════════════════════════════
 # ABAS
 # ══════════════════════════════════════════════════════════════════════════════
-aba1, aba2, aba3, aba4 = st.tabs([
+_tab_labels = [
     "🔍 Contar Item",
     "📊 Contagem Atual",
     "📁 Histórico de Inventários",
-    "📋 Base de Estoque"
-])
-
+    "📋 Base de Estoque",
+]
+if _is_admin:
+    _tab_labels.append("⚙️ Painel Admin")
+_all_tabs = st.tabs(_tab_labels)
+aba1, aba2, aba3, aba4 = _all_tabs[:4]
+aba_admin = _all_tabs[4] if _is_admin else None
 # ─── ABA 1: CONTAR ITEM ───────────────────────────────────────────────────────
 with aba1:
     if not st.session_state.inv_id:
@@ -688,75 +940,6 @@ with aba1:
         cod = (codigo or "").strip()
         _cod_completo = ("-" in cod and len(cod) >= 4) or len(cod) >= 8
 
-        # ── Leitor de câmera ──────────────────────────────────────────────────
-        with st.expander("📷 Ler QR Code / Código de Barras"):
-            _tab_qr, _tab_foto = st.tabs(["📷 QR Code ao vivo", "📸 Foto (todos os formatos)"])
-
-            # ── Tab 1: scanner ao vivo via câmera ──────────────────────────────
-            with _tab_qr:
-                st.caption(
-                    "Aponte a câmera para o QR Code — leitura automática, sem tirar foto.\n"
-                    "⚠️ Requer conexão HTTPS (funciona no Streamlit Cloud e localhost)."
-                )
-                try:
-                    from streamlit_qrcode_scanner import qrcode_scanner as _qr_scanner
-                    _qr_result = _qr_scanner(key=f"qr_{st.session_state.input_key}")
-                    if _qr_result:
-                        _cod_cam = str(_qr_result).strip()
-                        st.success(f"✅ Código lido: **{_cod_cam}**")
-                        st.session_state.ultimo_cod          = _cod_cam
-                        st.session_state.linha_selecionada   = None
-                        st.session_state.permitir_recontagem = False
-                        _res_cam = buscar_produto(df_estoque, _cod_cam, est_filtro)
-                        st.session_state.produto = _res_cam if not _res_cam.empty else None
-                        if _res_cam.empty:
-                            st.error(f"❌ Produto **{_cod_cam}** não encontrado na base.")
-                        st.rerun()
-                except ImportError:
-                    st.warning(
-                        "Pacote não instalado. Execute:\n```\npip install streamlit-qrcode-scanner\n```"
-                    )
-
-            # ── Tab 2: foto → pyzbar (Code128, EAN, QR e outros) ───────────────
-            with _tab_foto:
-                st.caption(
-                    "📱 **Celular:** Procurar arquivos → **Câmera** → fotografar a etiqueta\n"
-                    "🖥️ **PC:** selecionar imagem salva — suporta QR Code e código de barras."
-                )
-                _img_arq = st.file_uploader(
-                    "foto",
-                    type=["jpg", "jpeg", "png", "webp", "bmp"],
-                    key=f"cam_{st.session_state.input_key}",
-                    label_visibility="collapsed",
-                )
-                if _img_arq is not None:
-                    try:
-                        from PIL import Image
-                        from pyzbar import pyzbar as _pyzbar
-                        _decoded = _pyzbar.decode(Image.open(_img_arq).convert("RGB"))
-                        if _decoded:
-                            _cod_cam = _decoded[0].data.decode("utf-8").strip()
-                            st.success(f"✅ Código identificado: **{_cod_cam}**")
-                            st.session_state.ultimo_cod          = _cod_cam
-                            st.session_state.linha_selecionada   = None
-                            st.session_state.permitir_recontagem = False
-                            _res_cam = buscar_produto(df_estoque, _cod_cam, est_filtro)
-                            st.session_state.produto = _res_cam if not _res_cam.empty else None
-                            if _res_cam.empty:
-                                st.error(f"❌ Produto **{_cod_cam}** não encontrado na base.")
-                            st.rerun()
-                        else:
-                            st.warning(
-                                "⚠️ Código não identificado. Dicas:\n"
-                                "- Aproxime mais a câmera da etiqueta\n"
-                                "- Melhore a iluminação\n"
-                                "- Evite reflexos ou sombras"
-                            )
-                    except ImportError:
-                        st.error("❌ Execute: `pip install pyzbar Pillow`")
-                    except Exception as _e:
-                        st.error(f"❌ Erro ao processar imagem: {_e}")
-
         # Nova busca → zera seleção anterior
         if cod and (buscar or (cod != st.session_state.ultimo_cod and _cod_completo)):
             st.session_state.ultimo_cod       = cod
@@ -779,6 +962,19 @@ with aba1:
             # ════════════════════════════════════════════════════════════════
             if total > 1 and st.session_state.linha_selecionada is None:
 
+                # Pré-carrega contagens em memória (1 query → N lookups O(1))
+                _all_cnt_a = listar_contagens(st.session_state.inv_id)
+                _cnt_dict: dict = {}
+                if not _all_cnt_a.empty:
+                    for _, _c in _all_cnt_a.iterrows():
+                        _ck = (
+                            str(_c.get("cod_produto", "") or "").strip(),
+                            str(_c.get("id_estoque", "") or "").strip(),
+                            str(_c.get("ativo", "") or "").strip(),
+                            str(_c.get("lote", "") or "").strip(),
+                        )
+                        _cnt_dict[_ck] = dict(_c)
+
                 # Calcula totais para o banner
                 qtd_total_sistema = 0.0
                 for _, _r in df_p.iterrows():
@@ -792,7 +988,8 @@ with aba1:
                     _as  = _pat if _pat.upper() not in ["", "NAN", "NONE"] else ""
                     _lt  = str(_r.get("Lote", "")).strip()
                     _lt  = "" if _lt.upper() in ["NAN", "NONE"] else _lt
-                    if buscar_contagem_existente(st.session_state.inv_id, _r.get("Cód. Produto", ""), _r.get("Id. Estoq. Físico", ""), _as, _lt):
+                    _ck  = (str(_r.get("Cód. Produto", "") or "").strip(), str(_r.get("Id. Estoq. Físico", "") or "").strip(), _as, _lt)
+                    if _ck in _cnt_dict:
                         contados_ate_agora += 1
 
                 st.markdown(
@@ -827,10 +1024,13 @@ with aba1:
                         asalvo_r = pat if tem_pat else ""
                         lote_r   = str(row.get("Lote", "")).strip()
                         lote_r   = "" if lote_r.upper() in ["NAN", "NONE"] else lote_r
-                        ja_r = buscar_contagem_existente(
-                            st.session_state.inv_id,
-                            row.get("Cód. Produto", ""), row.get("Id. Estoq. Físico", ""), asalvo_r, lote_r
+                        _ja_key = (
+                            str(row.get("Cód. Produto", "") or "").strip(),
+                            str(row.get("Id. Estoq. Físico", "") or "").strip(),
+                            asalvo_r,
+                            lote_r,
                         )
+                        ja_r = _cnt_dict.get(_ja_key)
                         try:
                             qtd_sist_r = float(str(row.get("Qtd Estoque", "0")).replace(",", "."))
                         except Exception:
@@ -1248,19 +1448,38 @@ with aba2:
 # ─── ABA 3: HISTÓRICO DE INVENTÁRIOS ─────────────────────────────────────────
 with aba3:
     st.subheader("📁 Histórico de Inventários")
-    df_todos = listar_inventarios()
+    df_todos = listar_inventarios(usuario_id=_user.get("id"), todos=_is_admin)
 
     if df_todos.empty:
         st.info("Nenhum inventário criado ainda.")
     else:
+        # Pré-carrega contagem por inventário com uma única query GROUP BY
+        _cnt_por_inv: dict = {}
+        if not df_todos.empty:
+            _inv_ids_h = df_todos["id"].tolist()
+            _ph_h = ",".join([("%s" if USE_PG else "?")] * len(_inv_ids_h))
+            _sql_h = (
+                f"SELECT inventario_id, COUNT(*) AS cnt FROM contagens "
+                f"WHERE inventario_id IN ({_ph_h}) GROUP BY inventario_id"
+            )
+            _conn_h2 = get_conn()
+            if USE_PG:
+                _cur_h2 = _conn_h2.cursor()
+                _cur_h2.execute(_sql_h, _inv_ids_h)
+                for _rh in _fetchall(_cur_h2):
+                    _cnt_por_inv[_rh["inventario_id"]] = _rh["cnt"]
+                _cur_h2.close()
+            else:
+                for _rh in _conn_h2.execute(_sql_h, _inv_ids_h).fetchall():
+                    _cnt_por_inv[_rh[0]] = _rh[1]
+            _conn_h2.close()
+
         for _, inv in df_todos.iterrows():
-            conn_h = get_conn()
-            cur_h = _execute(conn_h, "SELECT COUNT(*) AS cnt FROM contagens WHERE inventario_id=?", (inv["id"],))
-            qtd = _fetchone(cur_h)["cnt"]
-            conn_h.close()
+            qtd = _cnt_por_inv.get(int(inv["id"]), 0)
 
             icone = "🟢" if inv["status"] == "Aberto" else "🔴"
-            with st.expander(f"{icone} #{inv['id']} – {inv['nome']} | {inv['data_inicio'][:10]} | {qtd} itens"):
+            owner_txt = (f" | 👤 {inv.get('usuario_nome') or '–'}" if _is_admin else "")
+            with st.expander(f"{icone} #{inv['id']} – {inv['nome']} | {inv['data_inicio'][:10]} | {qtd} itens{owner_txt}"):
 
                 col1, col2, col3 = st.columns(3)
                 col1.write(f"**Status:** {inv['status']}")
@@ -1404,3 +1623,125 @@ with aba4:
 
     _ini = (st.session_state.pag_base4 - 1) * por_pagina
     st.dataframe(df_final.iloc[_ini:_ini + por_pagina], use_container_width=True, hide_index=True)
+
+# ─── ABA ADMIN: PAINEL DE ADMINISTRAÇÃO ──────────────────────────────────────
+if _is_admin and aba_admin:
+    with aba_admin:
+        st.subheader("⚙️ Painel de Administração")
+
+        _sec_users, _sec_invs = st.tabs(["👥 Gerenciar Usuários", "📁 Todos os Inventários"])
+
+        # ── Gerenciar Usuários ─────────────────────────────────────────────────
+        with _sec_users:
+            df_us = listar_usuarios()
+
+            if not df_us.empty:
+                _df_exib = df_us.copy()
+                _df_exib["Tipo"] = _df_exib["is_admin"].apply(
+                    lambda x: "⭐ Admin" if int(x or 0) else "👤 Usuário")
+                st.dataframe(
+                    _df_exib[["id", "username", "Tipo", "created_at"]].rename(
+                        columns={"id": "ID", "username": "Usuário",
+                                 "created_at": "Cadastro"}),
+                    use_container_width=True, hide_index=True
+                )
+            else:
+                st.info("Nenhum usuário cadastrado ainda.")
+
+            st.divider()
+            _col_novo, _col_reset, _col_del = st.columns(3)
+
+            with _col_novo:
+                st.markdown("#### ➕ Novo Usuário")
+                with st.form("form_adm_novo_user"):
+                    _an_user = st.text_input("Usuário")
+                    _an_pwd  = st.text_input("Senha", type="password")
+                    _an_adm  = st.checkbox("É administrador?")
+                    if st.form_submit_button("Criar", type="primary",
+                                             use_container_width=True):
+                        nu = _an_user.strip().lower()
+                        if len(nu) < 3:
+                            st.error("Mínimo 3 caracteres.")
+                        elif len(_an_pwd) < 6:
+                            st.error("Senha: mínimo 6 caracteres.")
+                        else:
+                            ok, msg = cadastrar_usuario(nu, _an_pwd, _an_adm)
+                            if ok:
+                                st.success(f"✅ Usuário '{nu}' criado!")
+                                st.rerun()
+                            else:
+                                if "UNIQUE" in msg.upper():
+                                    st.error("❌ Usuário já existe.")
+                                else:
+                                    st.error(f"❌ {msg}")
+
+            with _col_reset:
+                st.markdown("#### 🔑 Redefinir Senha")
+                if not df_us.empty:
+                    with st.form("form_adm_reset"):
+                        _rs_sel = st.selectbox(
+                            "Usuário", df_us["username"].tolist(), key="rs_sel")
+                        _rs_p1  = st.text_input("Nova senha", type="password")
+                        _rs_p2  = st.text_input("Confirmar", type="password")
+                        if st.form_submit_button("Redefinir", type="primary",
+                                                  use_container_width=True):
+                            if _rs_p1 != _rs_p2:
+                                st.error("Senhas não coincidem.")
+                            elif len(_rs_p1) < 6:
+                                st.error("Mínimo 6 caracteres.")
+                            else:
+                                _rs_row = df_us[df_us["username"] == _rs_sel].iloc[0]
+                                alterar_senha_usuario(int(_rs_row["id"]), _rs_p1)
+                                st.success(f"✅ Senha de '{_rs_sel}' redefinida!")
+
+            with _col_del:
+                st.markdown("#### 🗑️ Excluir Usuário")
+                _outros = ([u for u in df_us["username"].tolist()
+                            if u != ADMIN_USUARIO] if not df_us.empty else [])
+                if _outros:
+                    with st.form("form_adm_del_user"):
+                        _du_sel = st.selectbox("Usuário", _outros, key="du_sel")
+                        st.warning(
+                            "⚠️ Todos os inventários e contagens deste "
+                            "usuário serão excluídos permanentemente!")
+                        if st.form_submit_button("🗑️ Excluir", type="primary",
+                                                  use_container_width=True):
+                            _du_row = df_us[df_us["username"] == _du_sel].iloc[0]
+                            deletar_usuario(int(_du_row["id"]))
+                            st.success(f"✅ Usuário '{_du_sel}' excluído.")
+                            st.rerun()
+                else:
+                    st.info("Nenhum outro usuário para excluir.")
+
+        # ── Todos os Inventários ───────────────────────────────────────────────
+        with _sec_invs:
+            df_all_inv = listar_inventarios(todos=True)
+            if df_all_inv.empty:
+                st.info("Nenhum inventário registrado.")
+            else:
+                _ma1, _ma2, _ma3 = st.columns(3)
+                _ma1.metric("Total de inventários", len(df_all_inv))
+                _ma2.metric("Abertos",
+                            int((df_all_inv["status"] == "Aberto").sum()))
+                _ma3.metric("Fechados",
+                            int((df_all_inv["status"] != "Aberto").sum()))
+                st.dataframe(
+                    df_all_inv[[c for c in
+                                ["id", "nome", "usuario_nome", "status",
+                                 "data_inicio", "data_fim", "descricao"]
+                                if c in df_all_inv.columns]].rename(
+                        columns={"usuario_nome": "Proprietário",
+                                 "nome": "Inventário", "status": "Status",
+                                 "data_inicio": "Início",
+                                 "data_fim": "Fim", "descricao": "Descrição"}),
+                    use_container_width=True, hide_index=True
+                )
+                _buf_adm = io.BytesIO()
+                df_all_inv.to_excel(_buf_adm, index=False, engine="openpyxl")
+                st.download_button(
+                    "⬇️ Exportar todos os inventários (Excel)",
+                    _buf_adm.getvalue(), "todos_inventarios.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+
