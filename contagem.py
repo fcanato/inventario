@@ -709,18 +709,27 @@ _user     = st.session_state.usuario_logado
 _is_admin = int(_user.get("is_admin") or 0) == 1
 
 # ── Carrega estoque isolado do usuário logado ──────────────────────────────────────────
-uid          = _user.get("id")
+uid           = _user.get("id")
 _estoque_file = get_estoque_file(uid)
-try:
-    df_estoque = carregar_estoque(uid)
+_SS_KEY       = f"_df_estoque_{uid}"
+
+if _SS_KEY in st.session_state:
+    # Usa df já parseado em memória (resultado de upload recente)
+    df_estoque = st.session_state[_SS_KEY]
     estoques_disponiveis = sorted(
         df_estoque["Id. Estoq. Físico"].unique().tolist()
     ) if not df_estoque.empty else []
-except Exception as e:
-    st.error(f"❌ Erro ao carregar base de estoque:\n\n{e}")
-    st.code(traceback.format_exc())
-    df_estoque = pd.DataFrame()
-    estoques_disponiveis = []
+else:
+    try:
+        df_estoque = carregar_estoque(uid)
+        estoques_disponiveis = sorted(
+            df_estoque["Id. Estoq. Físico"].unique().tolist()
+        ) if not df_estoque.empty else []
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar base de estoque:\n\n{e}")
+        st.code(traceback.format_exc())
+        df_estoque = pd.DataFrame()
+        estoques_disponiveis = []
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
@@ -825,11 +834,27 @@ with st.sidebar:
             label_visibility="collapsed"
         )
         if uploaded is not None:
-            with open(_estoque_file, "wb") as f:
-                f.write(uploaded.read())
-            carregar_estoque.clear()
-            st.success("✅ Estoque atualizado com sucesso!")
-            st.rerun()
+            _bytes = uploaded.getvalue()
+            _hash  = hashlib.md5(_bytes).hexdigest()
+            if st.session_state.get("_ultimo_upload_hash") != _hash:
+                # Salva no disco
+                with open(_estoque_file, "wb") as f:
+                    f.write(_bytes)
+                # Parseia dos bytes (já em memória — sem leitura de disco)
+                try:
+                    _df_new = pd.read_excel(io.BytesIO(_bytes), dtype=str)
+                    _df_new.columns = [_norm_col(c) for c in _df_new.columns]
+                    for _c in _df_new.columns:
+                        _df_new[_c] = _df_new[_c].fillna("").str.strip()
+                    st.session_state[_SS_KEY] = _df_new
+                except Exception:
+                    pass
+                st.session_state["_ultimo_upload_hash"] = _hash
+                carregar_estoque.clear()
+                st.success("✅ Estoque atualizado com sucesso!")
+                st.rerun()
+            else:
+                st.success("✅ Estoque já carregado.")
         if os.path.exists(_estoque_file):
             st.caption(f"Arquivo atual: `{os.path.basename(_estoque_file)}`")
         else:
@@ -837,6 +862,8 @@ with st.sidebar:
 
     if st.button("🔄 Recarregar estoque", use_container_width=True):
         carregar_estoque.clear()
+        st.session_state.pop(_SS_KEY, None)
+        st.session_state.pop("_ultimo_upload_hash", None)
         st.rerun()
 
     st.divider()
