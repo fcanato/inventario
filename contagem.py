@@ -3,6 +3,7 @@ import pandas as pd
 import sqlite3
 import os
 import io
+import re
 import traceback
 import unicodedata
 import hashlib
@@ -674,6 +675,46 @@ def buscar_produto(df, codigo, id_estoque=None):
             return filtrado
     return resultado
 
+def parse_etiqueta(codigo: str, estoques_validos=None):
+    """
+    Interpreta código de etiqueta no formato composto:
+      {Id. Estoq. Físico}{Cód. Produto}
+    Formatos suportados:
+      912TEIM0192Z          → dígitos + produto alfanumérico (começa com letra)
+      912 - TEIM0192Z       → separador " - " (espaço-hífen-espaço)
+      881 - 0256-0185-7     → separador " - ", produto numérico com hifens
+      881-0256-0185-7       → separador "-" simples, validado contra estoques
+    Retorna (id_estoque, cod_produto) ou (None, codigo_original) se não reconhecido.
+    """
+    cod = str(codigo).strip().upper()
+
+    # 1) Separador " - " com espaços (confiável mesmo com hifens no produto)
+    #    Ex: "912 - TEIM0192Z", "881 - 0256-0185-7"
+    m = re.match(r'^(\d+)\s+-\s+(.+)$', cod)
+    if m:
+        return m.group(1), m.group(2).strip()
+
+    # 2) Separador "-" simples sem espaços, validado contra estoques conhecidos
+    #    Ex: "912-TEIM0192Z", "881-0256-0185-7"
+    m2 = re.match(r'^(\d+)-(.+)$', cod)
+    if m2:
+        id_est   = m2.group(1)
+        cod_prod = m2.group(2).strip()
+        if estoques_validos and id_est in [str(e).strip() for e in estoques_validos]:
+            return id_est, cod_prod
+
+    # 3) Concatenado sem separador: dígitos + letra + resto (máscara já removida)
+    #    Ex: "912TEIM0192Z" → raw = "912TEIM0192Z"
+    cod_raw = re.sub(r'[^A-Z0-9]', '', cod)
+    m3 = re.match(r'^(\d{2,4})([A-Z][A-Z0-9]{3,})$', cod_raw)
+    if m3:
+        id_est   = m3.group(1)
+        cod_prod = m3.group(2)
+        if not estoques_validos or id_est in [str(e).strip() for e in estoques_validos]:
+            return id_est, cod_prod
+
+    return None, codigo
+
 def interpretar_ativo(valor):
     """Retorna True se o produto está ativo. Vazio/NaN = Ativo por padrão."""
     v = str(valor).strip().upper()
@@ -1027,7 +1068,9 @@ with aba1:
         if df_estoque.empty:
             st.warning("⚠️ Nenhuma base de estoque carregada. Faça o upload do seu arquivo Excel na barra lateral (📂 Carregar / Atualizar Estoque).")
         # ── Campo de busca ────────────────────────────────────────────────────
-        # Máscara JS: insere hífen automaticamente a cada 4 caracteres digitados
+        # Máscara JS: insere hífen a cada 4 chars, MAS apenas para códigos que
+        # começam com letra (ex: TEIM0192Z). Códigos que começam com dígito
+        # (etiquetas compostas: 912TEIM0192Z, 881-0256-0185-7) ficam sem máscara.
         st.html("""<script>(function(){
   if(window._codMaskReady)return;window._codMaskReady=true;
   function applyMask(el){
@@ -1036,6 +1079,8 @@ with aba1:
       if(e._fm)return;
       var s=this.selectionStart,p=this.value;
       var r=p.replace(/[^a-zA-Z0-9]/g,''),f='';
+      // Não mascara se começa com dígito (etiqueta composta ou código numérico)
+      if(r.length>0&&/^[0-9]/.test(r))return;
       for(var i=0;i<r.length;i++){if(i&&i%4===0)f+='-';f+=r[i];}
       if(f!==p){
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(this,f);
@@ -1051,7 +1096,7 @@ with aba1:
   }).observe(document.body,{childList:true,subtree:true});
 })();</script>""")
 
-        col_cod, col_est = st.columns([3, 1])
+        col_cod, col_est, col_limpar = st.columns([3, 1, 1])
         with col_cod:
             try:
                 from streamlit_keyup import st_keyup as _st_keyup
@@ -1059,32 +1104,61 @@ with aba1:
                     "📷 Código do Produto",
                     key=f"cod_input_{st.session_state.input_key}",
                     debounce=300,
-                    placeholder="Ex: 1234-5678 — busca automática",
+                    placeholder="Ex: 1234-5678 ou etiqueta 912TEIM0192Z — busca automática",
                 ) or ""
             except ImportError:
                 codigo = st.text_input(
                     "📷 Código do Produto (etiqueta ou manual)",
                     key=f"cod_input_{st.session_state.input_key}",
-                    placeholder="Ex: 1234-5678 — Enter para buscar",
+                    placeholder="Ex: 1234-5678 ou etiqueta 912TEIM0192Z — Enter para buscar",
                 ) or ""
         with col_est:
             est_filtro = st.selectbox("📍 Estoque Físico", ["Todos"] + estoques_disponiveis)
+        with col_limpar:
+            st.markdown("<div style='margin-top:28px'>", unsafe_allow_html=True)
+            if st.button("🗑️ Limpar", use_container_width=True, help="Limpa o campo e reinicia a busca"):
+                st.session_state.produto             = None
+                st.session_state.ultimo_cod          = ""
+                st.session_state.linha_selecionada   = None
+                st.session_state.permitir_recontagem = False
+                st.session_state.input_key          += 1
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
 
-        buscar = st.button("🔎 Buscar", type="primary", use_container_width=True)
+        col_buscar, _ = st.columns([3, 2])
+        with col_buscar:
+            buscar = st.button("🔎 Buscar", type="primary", use_container_width=True)
         cod = (codigo or "").strip()
         _cod_completo = ("-" in cod and len(cod) >= 4) or len(cod) >= 8
+
+        # ── Detecta etiqueta composta: {Id.Estoq.Físico}{Cód.Produto} ─────────
+        _id_est_det, _cod_prod_det = parse_etiqueta(cod, estoques_disponiveis)
+        _etiqueta_composta = _id_est_det is not None
+
+        if _etiqueta_composta and cod:
+            st.info(
+                f"🏷️ Etiqueta detectada — "
+                f"Estoque Físico: **{_id_est_det}** &nbsp;|&nbsp; "
+                f"Cód. Produto: **{_cod_prod_det}**"
+            )
 
         # Nova busca → zera seleção anterior
         if cod and (buscar or (cod != st.session_state.ultimo_cod and _cod_completo)):
             st.session_state.ultimo_cod       = cod
             st.session_state.linha_selecionada = None
             st.session_state.permitir_recontagem = False
-            resultado = buscar_produto(df_estoque, cod, est_filtro)
+            # Etiqueta composta: usa id_estoque e cod_produto extraídos automaticamente
+            if _etiqueta_composta:
+                resultado = buscar_produto(df_estoque, _cod_prod_det, _id_est_det)
+            else:
+                resultado = buscar_produto(df_estoque, cod, est_filtro)
             st.session_state.produto = resultado if not resultado.empty else None
 
         # ── Produto não encontrado ────────────────────────────────────────────
         if cod and st.session_state.ultimo_cod == cod and st.session_state.produto is None:
-            st.error(f"❌ Produto **{cod}** não encontrado na base de estoque.")
+            _cod_exib = _cod_prod_det if _etiqueta_composta else cod
+            _est_exib = f" (Estoque: {_id_est_det})" if _etiqueta_composta else ""
+            st.error(f"❌ Produto **{_cod_exib}**{_est_exib} não encontrado na base de estoque.")
 
         # ── Produto(s) encontrado(s) ──────────────────────────────────────────
         elif st.session_state.produto is not None:
@@ -1214,14 +1288,14 @@ with aba1:
                             unsafe_allow_html=True
                         )
 
-                        qtd_default = float(ja_r["qtd_contada"]) if ja_r else 0.0
+                        qtd_default = int(ja_r["qtd_contada"]) if ja_r else None
                         obs_default = ja_r["observacao"] if ja_r else ""
 
                         col_q, col_o = st.columns([1, 2])
                         with col_q:
                             qtd_val = st.number_input(
                                 f"Qtd contada — Pat. {pat if tem_pat else idx+1}",
-                                min_value=0.0, value=qtd_default, step=1.0,
+                                min_value=0, value=qtd_default, step=1,
                                 key=f"qtd_multi_{idx}_{st.session_state.input_key}"
                             )
                         with col_o:
@@ -1241,6 +1315,7 @@ with aba1:
                     if submitted:
                         salvos = 0
                         for idx, row, asalvo_r, lote_r, qtd_sist_r, qtd_val, obs_val in entradas:
+                            qtd_val = qtd_val if qtd_val is not None else 0
                             diferenca = qtd_val - qtd_sist_r
                             dados = {
                                 "id_estoque":   row.get("Id. Estoq. Físico", ""),
@@ -1369,16 +1444,17 @@ with aba1:
                         )
 
                     with st.form("form_contagem", clear_on_submit=True):
-                        qtd_default = float(ja_contado["qtd_contada"]) if ja_contado else 0.0
+                        qtd_default = int(ja_contado["qtd_contada"]) if ja_contado else None
                         qtd_contada = st.number_input(
                             "📦 Quantidade contada fisicamente",
-                            min_value=0.0, value=qtd_default, step=1.0
+                            min_value=0, value=qtd_default, step=1
                         )
                         obs_default = ja_contado["observacao"] if ja_contado else ""
                         obs = st.text_input("📝 Observação (opcional)", value=obs_default)
 
                         if st.form_submit_button("✅ Confirmar Contagem", type="primary",
                                                  use_container_width=True):
+                            qtd_contada = qtd_contada if qtd_contada is not None else 0
                             diferenca = qtd_contada - qtd_sist
                             dados = {
                                 "id_estoque":   linha.get("Id. Estoq. Físico", ""),
