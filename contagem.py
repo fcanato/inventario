@@ -166,6 +166,26 @@ except NameError:
 
 DB_FILE = os.path.join(BASE_DIR, "contagem.db")
 
+def formatar_quantidade(valor):
+    """Exibe quantidades sem zeros desnecessários e com vírgula decimal."""
+    numero = float(valor or 0)
+    if numero.is_integer():
+        return str(int(numero))
+    return f"{numero:.10f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
+def parse_quantidade(valor):
+    """Converte quantidade digitada com vírgula ou ponto para float."""
+    texto = str(valor or "").strip().replace(" ", "")
+    if not texto:
+        return 0.0
+    # No padrão brasileiro, pontos podem separar milhares quando há vírgula.
+    if "," in texto:
+        texto = texto.replace(".", "").replace(",", ".")
+    if not re.fullmatch(r"\d+(?:\.\d+)?", texto):
+        raise ValueError("Informe apenas um número positivo, como 13,6.")
+    return float(texto)
+
 def get_estoque_file(user_id):
     """Retorna o caminho do arquivo de estoque isolado por usuário."""
     return os.path.join(BASE_DIR, f"estoque_{user_id}.xlsx")
@@ -1214,7 +1234,7 @@ with aba1:
                     f"✅ {contados_ate_agora}/{total} contados</span>"
                     f"<span style='background:#e3f2fd;border:1px solid #64b5f6;border-radius:8px;"
                     f"padding:6px 14px;font-size:13px;font-weight:700;color:#1565c0'>"
-                    f"📊 Qtd Sistema Total: {qtd_total_sistema:.0f}</span>"
+                    f"📊 Qtd Sistema Total: {formatar_quantidade(qtd_total_sistema)}</span>"
                     f"</div></div>",
                     unsafe_allow_html=True
                 )
@@ -1282,20 +1302,20 @@ with aba1:
                             + _ident_html
                             + f"<div style='font-size:12px;color:#555;margin-top:6px'>"
                             f"📍 {row['Id. Estoq. Físico']} | "
-                            f"Qtd Sistema: <b>{qtd_sist_r:.0f}</b> {row.get('Unid. Medida','')}"
-                            + (f" | ✅ Já contado: <b>{ja_r['qtd_contada']:.0f}</b> em {ja_r['data_hora'][:16]}" if ja_r else "")
+                            f"Qtd Sistema: <b>{formatar_quantidade(qtd_sist_r)}</b> {row.get('Unid. Medida','')}"
+                            + (f" | ✅ Já contado: <b>{formatar_quantidade(ja_r['qtd_contada'])}</b> em {ja_r['data_hora'][:16]}" if ja_r else "")
                             + f"</div></div>",
                             unsafe_allow_html=True
                         )
 
-                        qtd_default = int(ja_r["qtd_contada"]) if ja_r else None
+                        qtd_default = formatar_quantidade(ja_r["qtd_contada"]) if ja_r else ""
                         obs_default = ja_r["observacao"] if ja_r else ""
 
                         col_q, col_o = st.columns([1, 2])
                         with col_q:
-                            qtd_val = st.number_input(
+                            qtd_val = st.text_input(
                                 f"Qtd contada — Pat. {pat if tem_pat else idx+1}",
-                                min_value=0, value=qtd_default, step=1,
+                                value=qtd_default, placeholder="Ex.: 13,6",
                                 key=f"qtd_multi_{idx}_{st.session_state.input_key}"
                             )
                         with col_o:
@@ -1313,9 +1333,23 @@ with aba1:
                     )
 
                     if submitted:
-                        salvos = 0
+                        entradas_convertidas = []
+                        erros = []
                         for idx, row, asalvo_r, lote_r, qtd_sist_r, qtd_val, obs_val in entradas:
-                            qtd_val = qtd_val if qtd_val is not None else 0
+                            try:
+                                qtd_num = parse_quantidade(qtd_val)
+                                entradas_convertidas.append(
+                                    (idx, row, asalvo_r, lote_r, qtd_sist_r, qtd_num, obs_val)
+                                )
+                            except ValueError:
+                                erros.append(f"Item {idx + 1}: valor '{qtd_val}' inválido")
+
+                        if erros:
+                            st.error("❌ Corrija as quantidades:\n\n- " + "\n- ".join(erros))
+                            st.stop()
+
+                        salvos = 0
+                        for idx, row, asalvo_r, lote_r, qtd_sist_r, qtd_val, obs_val in entradas_convertidas:
                             diferenca = qtd_val - qtd_sist_r
                             dados = {
                                 "id_estoque":   row.get("Id. Estoq. Físico", ""),
@@ -1401,7 +1435,7 @@ with aba1:
                         qtd_sist = float(str(qtd_sist_raw).replace(",", ".")) if qtd_sist_raw not in ["", "nan"] else 0.0
                     except Exception:
                         qtd_sist = 0.0
-                    st.metric("Qtd Sistema", f"{qtd_sist:.0f}")
+                    st.metric("Qtd Sistema", formatar_quantidade(qtd_sist))
 
                 # ── Botão voltar (apenas informativo, total=1 sempre aqui) ────
 
@@ -1414,9 +1448,9 @@ with aba1:
                 if ja_contado and not st.session_state.permitir_recontagem:
                     st.warning(
                         f"⚠️ **Item já contado neste inventário!**\n\n"
-                        f"- 📦 Qtd contada: **{ja_contado['qtd_contada']:.0f}**\n"
-                        f"- 📋 Qtd sistema: **{ja_contado['qtd_sistema']:.0f}**\n"
-                        f"- ↕️ Diferença: **{ja_contado['diferenca']:+.0f}**\n"
+                        f"- 📦 Qtd contada: **{formatar_quantidade(ja_contado['qtd_contada'])}**\n"
+                        f"- 📋 Qtd sistema: **{formatar_quantidade(ja_contado['qtd_sistema'])}**\n"
+                        f"- ↕️ Diferença: **{'+' if ja_contado['diferenca'] >= 0 else ''}{formatar_quantidade(ja_contado['diferenca'])}**\n"
                         f"- 👤 Operador: **{ja_contado['operador'] or '–'}**\n"
                         f"- 🕐 Data/hora: **{ja_contado['data_hora']}**"
                         + (f"\n- 🏷️ Patrimônio: **{ativo_num}**" if ativo_tem_numero else "")
@@ -1440,21 +1474,25 @@ with aba1:
                     if ja_contado:
                         st.info(
                             f"✏️ **Modo correção** — contagem anterior: "
-                            f"**{ja_contado['qtd_contada']:.0f}** em {ja_contado['data_hora']}"
+                            f"**{formatar_quantidade(ja_contado['qtd_contada'])}** em {ja_contado['data_hora']}"
                         )
 
                     with st.form("form_contagem", clear_on_submit=True):
-                        qtd_default = int(ja_contado["qtd_contada"]) if ja_contado else None
-                        qtd_contada = st.number_input(
+                        qtd_default = formatar_quantidade(ja_contado["qtd_contada"]) if ja_contado else ""
+                        qtd_contada_texto = st.text_input(
                             "📦 Quantidade contada fisicamente",
-                            min_value=0, value=qtd_default, step=1
+                            value=qtd_default, placeholder="Ex.: 13,6"
                         )
                         obs_default = ja_contado["observacao"] if ja_contado else ""
                         obs = st.text_input("📝 Observação (opcional)", value=obs_default)
 
                         if st.form_submit_button("✅ Confirmar Contagem", type="primary",
                                                  use_container_width=True):
-                            qtd_contada = qtd_contada if qtd_contada is not None else 0
+                            try:
+                                qtd_contada = parse_quantidade(qtd_contada_texto)
+                            except ValueError as exc:
+                                st.error(f"❌ {exc}")
+                                st.stop()
                             diferenca = qtd_contada - qtd_sist
                             dados = {
                                 "id_estoque":   linha.get("Id. Estoq. Físico", ""),
@@ -1486,7 +1524,7 @@ with aba1:
 
                             _msg_toast = (
                                 f"✅ {acao}: {linha['Cód. Produto']}{pat_reg} "
-                                f"| Dif: {sinal}{diferenca:.0f}"
+                                f"| Dif: {sinal}{formatar_quantidade(diferenca)}"
                             )
                             st.toast(_msg_toast, icon="✅")
                             st.rerun()
@@ -1551,7 +1589,7 @@ with aba1:
                         qtd_sist_r = row.get("Qtd Estoque", "0")
                         qtd_cnt_r  = (
                             f"<br><span style='font-size:12px;color:#2e7d32'>"
-                            f"✅ Contado: <b>{ja_cnt_r['qtd_contada']:.0f}</b> "
+                            f"✅ Contado: <b>{formatar_quantidade(ja_cnt_r['qtd_contada'])}</b> "
                             f"({ja_cnt_r['data_hora'][:16]})</span>"
                             if ja_cnt_r else ""
                         )
