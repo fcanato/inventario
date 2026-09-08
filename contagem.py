@@ -527,14 +527,10 @@ def _ensure_admin():
 
 
 try:
-    st.write("Validando usuário administrador...")
     _ensure_admin()
-    st.success("✅ _ensure_admin() concluído")
-
 except Exception as e:
-    st.error("❌ ERRO NO _ensure_admin()")
+    st.error("❌ Erro ao validar usuário administrador.")
     st.exception(e)
-    st.code(traceback.format_exc())
     st.stop()
 
 
