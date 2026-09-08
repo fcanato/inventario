@@ -204,11 +204,18 @@ ADMIN_SENHA_DEF = (st.secrets.get("ADMIN_SENHA", "Admin@2026")  if hasattr(st, "
 
 def get_conn():
     if USE_PG:
-        conn = psycopg2.connect(SUPABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
-        return conn
+        return psycopg2.connect(
+            SUPABASE_URL,
+            cursor_factory=psycopg2.extras.RealDictCursor,
+            sslmode="require",
+            connect_timeout=15,
+            application_name="inventario_streamlit"
+        )
+
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 def _execute(conn, sql, params=()):
     """Executa SQL adaptando placeholders %s (PG) ↔ ? (SQLite)."""
@@ -516,13 +523,56 @@ def _ensure_admin():
         cadastrar_usuario(ADMIN_USUARIO, ADMIN_SENHA_DEF, is_admin=True)
 
 # Inicializa banco — erros aparecem no frontend
+
+st.info("🔎 Modo diagnóstico ativado")
+
+st.write("Streamlit iniciado: ✅")
+st.write("Driver psycopg2 disponível:", PSYCOPG2_OK)
+st.write("SUPABASE_URL configurada:", bool(SUPABASE_URL))
+st.write("Modo PostgreSQL ativo:", USE_PG)
+
 try:
-    init_db()
-    _ensure_admin()
+    st.write("Testando conexão com Supabase...")
+    conn_teste = get_conn()
+
+    cur_teste = conn_teste.cursor()
+    cur_teste.execute("SELECT 1 AS teste")
+    resultado = cur_teste.fetchone()
+
+    st.success(f"✅ Conexão com Supabase funcionando: {resultado}")
+
+    cur_teste.close()
+    conn_teste.close()
+
 except Exception as e:
-    st.error(f"❌ Erro ao inicializar banco de dados:\n\n{e}")
+    st.error("❌ FALHA NA CONEXÃO COM SUPABASE")
+    st.exception(e)
     st.code(traceback.format_exc())
     st.stop()
+
+try:
+    st.write("Inicializando estrutura do banco...")
+    init_db()
+    st.success("✅ init_db() concluído")
+
+except Exception as e:
+    st.error("❌ ERRO NO init_db()")
+    st.exception(e)
+    st.code(traceback.format_exc())
+    st.stop()
+
+try:
+    st.write("Validando usuário administrador...")
+    _ensure_admin()
+    st.success("✅ _ensure_admin() concluído")
+
+except Exception as e:
+    st.error("❌ ERRO NO _ensure_admin()")
+    st.exception(e)
+    st.code(traceback.format_exc())
+    st.stop()
+
+
 
 # ── Funções de Inventário ──────────────────────────────────────────────────────
 def criar_inventario(nome, descricao, usuario_id=None):
