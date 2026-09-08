@@ -524,42 +524,7 @@ def _ensure_admin():
 
 # Inicializa banco — erros aparecem no frontend
 
-st.info("🔎 Modo diagnóstico ativado")
 
-st.write("Streamlit iniciado: ✅")
-st.write("Driver psycopg2 disponível:", PSYCOPG2_OK)
-st.write("SUPABASE_URL configurada:", bool(SUPABASE_URL))
-st.write("Modo PostgreSQL ativo:", USE_PG)
-
-try:
-    st.write("Testando conexão com Supabase...")
-    conn_teste = get_conn()
-
-    cur_teste = conn_teste.cursor()
-    cur_teste.execute("SELECT 1 AS teste")
-    resultado = cur_teste.fetchone()
-
-    st.success(f"✅ Conexão com Supabase funcionando: {resultado}")
-
-    cur_teste.close()
-    conn_teste.close()
-
-except Exception as e:
-    st.error("❌ FALHA NA CONEXÃO COM SUPABASE")
-    st.exception(e)
-    st.code(traceback.format_exc())
-    st.stop()
-
-try:
-    st.write("Inicializando estrutura do banco...")
-    init_db()
-    st.success("✅ init_db() concluído")
-
-except Exception as e:
-    st.error("❌ ERRO NO init_db()")
-    st.exception(e)
-    st.code(traceback.format_exc())
-    st.stop()
 
 try:
     st.write("Validando usuário administrador...")
